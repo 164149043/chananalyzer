@@ -38,10 +38,23 @@ def check_dependencies():
     return True
 
 
-def start_server(host="127.0.0.1", port=8000, open_browser=True):
+def start_server(host=None, port=None, open_browser=True):
     """启动 FastAPI 服务器"""
     if not check_dependencies():
         return
+
+    # 检测是否在云平台环境（Render、Railway 等）
+    is_cloud = os.environ.get("RENDER", "") or os.environ.get("RAILWAY", "") or os.environ.get("PORT", "")
+
+    # 云平台默认配置
+    if host is None:
+        host = "0.0.0.0" if is_cloud else "127.0.0.1"
+    if port is None:
+        port = int(os.environ.get("PORT", "8000"))
+
+    # 云环境不打开浏览器
+    if is_cloud:
+        open_browser = False
 
     # 导入 app
     from web.api import app
@@ -83,8 +96,8 @@ def start_server(host="127.0.0.1", port=8000, open_browser=True):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ChanAnalyzer Web 服务")
-    parser.add_argument("--host", default="127.0.0.1", help="监听地址")
-    parser.add_argument("--port", type=int, default=8000, help="监听端口")
+    parser.add_argument("--host", default=None, help="监听地址（默认云平台0.0.0.0，本地127.0.0.1）")
+    parser.add_argument("--port", type=int, default=None, help="监听端口（默认从环境变量PORT读取或8000）")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     args = parser.parse_args()
