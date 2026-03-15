@@ -13,7 +13,7 @@ cos_config.yaml
 
 # 环境变量和敏感配置
 .env
-ai_config.yaml
+# ai_config.yaml 已移除此排除 - 无敏感信息，需要上传
 
 # 虚拟环境
 venv/
