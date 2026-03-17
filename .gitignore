@@ -41,6 +41,9 @@ htmlcov/
 改进意见/
 输入内容/
 
+# 用户会话数据（运行时生成）
+web/users/
+
 # 其他
 .DS_Store
 *.swp
