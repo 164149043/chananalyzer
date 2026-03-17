@@ -154,7 +154,10 @@ python scan_stocks_cache.py --industry 电子 --buy 2 3a 3b --min-money-flow 500
 ### 首次使用完整流程
 
 ```bash
-# 1. 查看所有行业（确认股票池正常）
+# 1. 同步股票基本信息（名称、行业、地区）- 首次使用必做
+python -m scripts.cache_stock_info
+
+# 2. 查看所有行业（确认股票池正常）
 python scan_stocks.py --list-industries
 
 # 2. 测试缓存 100 只股票
@@ -959,6 +962,17 @@ Web 功能：
 1. 未缓存 K 线数据 - 先运行 `python -m scripts.cache_all_stocks --all --kl-types DAY --limit 100`
 2. 筛选条件过于严格 - 尝试减少选择的买卖点类型
 3. 数据库路径问题 - 确保 `chan.db` 在项目根目录
+
+### Q: 扫描结果显示的股票名称和代码一样，没有显示名称？
+
+**A**: 需要先同步股票基本信息：
+
+```bash
+# 同步股票名称、行业、地区到数据库
+python -m scripts.cache_stock_info
+```
+
+此命令会将股票的基本信息存储到 `chan.db` 的 `stock_info` 表中。
 
 ### Q: scan_stocks.py 和 scan_stocks_cache.py 有什么区别？
 
