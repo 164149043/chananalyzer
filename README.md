@@ -526,6 +526,15 @@ CREATE TABLE kline_data (
 - **数据来源**: Tushare Pro API
 - **更新方式**: 使用 `cache_all_stocks.py` 或 `update_data.py`
 
+### 默认数据范围
+
+| 周期 | 默认开始日期 | 说明 |
+|------|-------------|------|
+| 日线 | 2023-01-01 | 约 3 年历史数据 |
+| 周线 | 2023-01-01 | 建议与日线保持一致 |
+
+> **注意**：首次缓存周线数据时，确保使用 `--begin 2023-01-01` 参数，否则可能只获取最近几天的数据。
+
 ### 使用本地数据库
 
 ```python
@@ -654,7 +663,18 @@ python scan_stocks_cache.py --sell 2s
 | `--limit` | 限制数量 | `--limit 100` |
 | `--kl-types` | K线周期类型 | `--kl-types DAY WEEK` |
 | `--delay` | 请求延迟（秒） | `--delay 0.3` |
-| `--begin` | 开始日期 | `--begin 2023-01-01` |
+| `--begin` | 开始日期（默认2023-01-01） | `--begin 2023-01-01` |
+| `--end` | 结束日期（默认今天） | `--end 2024-12-31` |
+
+### update_data.py 参数
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--all` | 更新所有已缓存股票 | `--all` |
+| `--codes` | 指定股票代码 | `--codes 000001` |
+| `--kl-types` | K线周期类型 | `--kl-types DAY WEEK` |
+| `--refresh` | 清除缓存后重新获取 | `--refresh` |
+| `--verbose` | 显示详细日志 | `--verbose` |
 
 ---
 
