@@ -2,870 +2,225 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A股缠论分析系统</title>
-  <!-- SVG Favicon -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' style='stop-color:%233b82f6'/><stop offset='100%' style='stop-color:%2310b981'/></linearGradient></defs><rect fill='url(%23g)' width='100' height='100' rx='20'/><path fill='white' d='M20 50 L35 35 L50 50 L65 30 L80 50 L80 70 L65 50 L50 70 L35 50 L20 70 Z'/><circle cx='50' cy='50' r='8' fill='white' opacity='0.9'/></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>缠论分析</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    /* 基础重置：让布局占满全屏，无内外边距 */
-    * {
+    /* ============================================
+       禅意数据终端 - 独特设计系统
+       ============================================ */
+
+    /* === 色彩系统 === */
+    :root {
+      /* 主色调 - 朱砂红（中国股市上涨色） */
+      --zhu-red: #c8372e;
+      --zhu-red-light: #e85a4f;
+      --zhu-red-dim: rgba(200, 55, 46, 0.15);
+
+      /* 辅色调 - 翡翠绿（中国股市下跌色） */
+      --fei-green: #2d7a5c;
+      --fei-green-light: #3da57a;
+      --fei-green-dim: rgba(45, 122, 92, 0.15);
+
+      /* 中性色 - 墨色系 */
+      --ink-black: #0d0d0d;
+      --ink-dark: #1a1a1a;
+      --ink-mid: #2d2d2d;
+      --ink-light: #4a4a4a;
+      --ink-pale: #6b6b6b;
+      --ink-faint: #8a8a8a;
+
+      /* 背景色 */
+      --bg-primary: #0a0a0a;
+      --bg-secondary: #111111;
+      --bg-elevated: #1a1a1a;
+      --bg-card: #151515;
+
+      /* 边框与分割 */
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.12);
+      --border-strong: rgba(255, 255, 255, 0.2);
+
+      /* 文字 */
+      --text-primary: #e8e8e8;
+      --text-secondary: #a0a0a0;
+      --text-tertiary: #6b6b6b;
+
+      /* 间距系统 */
+      --space-xs: 4px;
+      --space-sm: 8px;
+      --space-md: 12px;
+      --space-lg: 16px;
+      --space-xl: 24px;
+      --space-2xl: 32px;
+      --space-3xl: 48px;
+
+      /* 圆角 */
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+
+      /* 字体 */
+      --font-display: 'Noto Serif SC', serif;
+      --font-body: 'Noto Sans SC', -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+
+      /* 阴影 */
+      --shadow-subtle: 0 2px 8px rgba(0, 0, 0, 0.4);
+      --shadow-medium: 0 4px 16px rgba(0, 0, 0, 0.5);
+      --shadow-strong: 0 8px 32px rgba(0, 0, 0, 0.6);
+    }
+
+    /* === 基础重置 === */
+    *, *::before, *::after {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      font-family: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
     }
 
-    html, body {
-      height: 100%;
-      background: #eef2f5;  /* 与新拟态背景色一致，使边缘过渡自然 */
-    }
-
-    /* 背景光晕效果 */
-    body::before {
-      content: '';
-      position: fixed;
-      top: -50%;
-      left: -50%;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
-                  radial-gradient(circle at 70% 80%, rgba(16, 185, 129, 0.03) 0%, transparent 50%);
-      pointer-events: none;
-      z-index: -1;
+    html {
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     body {
-      overflow-x: hidden;    /* 防止阴影溢出产生横向滚动条（可选）*/
-    }
-
-    /* 主容器：左右结构，占满全屏，列之间保留20px间隔 */
-    .dashboard {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      gap: 20px;             /* 侧边栏与内容区的间距 */
-      padding: 0;            /* 关键：无内边距，使侧边栏左侧贴边，内容右侧贴边 */
-    }
-
-    /* 新拟态卡片基类 (凸起) */
-    .neumorph-card {
-      background: #eef2f5;
-      box-shadow: 12px 12px 24px #c0c8d0, -12px -12px 24px #ffffff;
-      border-radius: 48px;
-      padding: 28px 20px;
-      transition: box-shadow 0.2s ease;
-    }
-
-    /* 左侧边栏 */
-    .sidebar {
-      width: 280px;
-      display: flex;
-      flex-direction: column;
-      height: 100%;          /* 撑满左侧高度 */
-    }
-
-    .sidebar-header {
-      padding: 0 16px 20px 16px;
-      border-bottom: 2px solid rgba(192, 200, 208, 0.3);
-      margin-bottom: 24px;
-    }
-
-    .sidebar-header h2 {
-      font-weight: 450;
-      color: #3d4a5c;
-      font-size: 1.8rem;
-      letter-spacing: 0.5px;
-      text-shadow: 2px 2px 4px #c0c8d0, -2px -2px 4px #ffffff;
-    }
-
-    .sidebar-header p {
-      color: #607080;
-      font-size: 0.9rem;
-      margin-top: 6px;
-    }
-
-    /* 菜单列表 */
-    .menu {
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-      flex: 1;
-      overflow-y: auto;  /* 菜单项过多时允许滚动 */
-      padding-right: 8px;  /* 为滚动条留出空间 */
-    }
-
-    /* 滚动条样式 */
-    .menu::-webkit-scrollbar {
-      width: 6px;
-    }
-    .menu::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .menu::-webkit-scrollbar-thumb {
-      background: #c0c8d0;
-      border-radius: 3px;
-    }
-
-    /* 新拟态菜单项 (按钮) */
-    .menu-item {
-      background: #eef2f5;
-      box-shadow: 8px 8px 16px #c0c8d0, -8px -8px 16px #ffffff;
-      border-radius: 100px;        /* 大圆角药丸形状 */
-      padding: 16px 24px;
-      border: none;
-      font-size: 1.2rem;
-      font-weight: 550;
-      color: #3d4a5c;
-      text-align: left;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      width: 100%;
-    }
-
-    .menu-item .icon {
-      font-size: 1.7rem;
-      filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.1));
-    }
-
-    /* 激活状态的菜单 — 内凹效果 */
-    .menu-item.active {
-      box-shadow: inset 6px 6px 12px #c0c8d0, inset -6px -6px 12px #ffffff;
-      color: #2b3b4e;
-    }
-
-    .menu-item:hover:not(.active) {
-      box-shadow: 10px 10px 20px #b0b8c0, -10px -10px 20px #ffffff;
-    }
-
-    /* 右侧内容区域 — 自动填满剩余宽度 */
-    .content-panel {
-      flex: 1;               /* 关键：填满右侧剩余空间 */
-      height: 100%;          /* 高度撑满 */
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* 动态内容卡片 (带内凹阴影，增加层次) */
-    .content-card {
-      background: #eef2f5;
-      box-shadow: inset 2px 2px 5px #c0c8d0, inset -2px -2px 5px #ffffff, 12px 12px 24px #c0c8d0, -12px -12px 24px #ffffff;
-      border-radius: 42px;
-      padding: 32px 36px;
-      height: 100%;
-      color: #3d4a5c;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      overflow-y: auto;
-    }
-
-    /* 个股分析页面卡片特殊样式：不限制高度 */
-    .content-card #individual {
-      height: auto;
-      min-height: 100%;
-      overflow: visible;
-    }
-
-    .content-card h3 {
-      font-size: 2.2rem;
-      font-weight: 420;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .content-card h3 span {
-      font-size: 2.5rem;
-    }
-
-    .content-divider {
-      height: 3px;
-      width: 200px;
-      background: linear-gradient(90deg, #b0c0d0, transparent);
-      margin: 25px 0 30px 0;
-      border-radius: 3px;
-    }
-
-    /* 占位内容样式 */
-    .placeholder-content {
-      text-align: center;
-      color: #7a8b9f;
-    }
-
-    .placeholder-icon {
-      font-size: 5rem;
-      margin-bottom: 24px;
-      opacity: 0.6;
-    }
-
-    .placeholder-title {
-      font-size: 1.8rem;
-      font-weight: 500;
-      color: #5a6b7c;
-      margin-bottom: 16px;
-    }
-
-    .placeholder-desc {
-      font-size: 1.2rem;
-      color: #7a8b9f;
-      letter-spacing: 1px;
-    }
-
-    /* 股票表格样式（用于买点扫描、卖点扫描页面） */
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .stock-table th {
-      text-align: left;
-      padding: 10px 12px;
-      font-size: 0.85rem;
-      color: #607080;
-      border-bottom: 2px solid rgba(192, 200, 208, 0.4);
-    }
-
-    .stock-table td {
-      padding: 12px;
-      font-size: 0.95rem;
-      color: #3d4a5c;
-      border-bottom: 1px solid rgba(192, 200, 208, 0.2);
-    }
-
-    .stock-table tr:last-child td {
-      border-bottom: none;
-    }
-
-    .stock-table .code {
-      font-family: 'Consolas', monospace;
-      color: #5a6b7c;
-    }
-
-    .stock-table .bs-type {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      background: #eef2f5;
-      box-shadow: 2px 2px 4px #c0c8d0, -2px -2px 4px #ffffff;
-    }
-
-    /* ===== 扫描控制区 ===== */
-    .scan-controls {
-      background: #eef2f5;
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border-radius: 24px;
-      padding: 20px;
-      margin-bottom: 20px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 20px;
-      align-items: flex-end;
-    }
-
-    .filter-group {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .filter-label {
-      font-size: 0.9rem;
-      color: #607080;
-      font-weight: 500;
-    }
-
-    .checkbox-group {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-
-    .checkbox-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.9rem;
-      color: #3d4a5c;
-      cursor: pointer;
-      padding: 8px 16px;
-      background: #eef2f5;
-      box-shadow: 3px 3px 6px #c0c8d0, -3px -3px 6px #ffffff;
-      border-radius: 20px;
-      transition: all 0.2s ease;
-    }
-
-    .checkbox-item:hover {
-      box-shadow: 4px 4px 8px #b8c0c8, -4px -4px 8px #ffffff;
-    }
-
-    .checkbox-item input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      accent-color: #3b82f6;
-      cursor: pointer;
-    }
-
-    .filter-select {
-      background: linear-gradient(145deg, #f5f8fb, #e5eaf0);
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border: none;
-      border-radius: 16px;
-      padding: 10px 16px;
-      font-size: 0.95rem;
-      color: #3d4a5c;
-      outline: none;
-      cursor: pointer;
-      min-width: 120px;
-    }
-
-    .filter-select:focus {
-      box-shadow: inset 4px 4px 8px #b8c0c8, inset -4px -4px 8px #ffffff;
-    }
-
-    /* ===== 扫描进度 ===== */
-    .scan-progress {
-      background: #eef2f5;
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border-radius: 20px;
-      padding: 16px 20px;
-      margin-bottom: 20px;
-    }
-
-    .progress-bar {
-      background: linear-gradient(145deg, #e5eaf0, #d5dce5);
-      box-shadow: inset 2px 2px 4px #b8c0c8, inset -2px -2px 4px #ffffff;
-      border-radius: 12px;
-      height: 12px;
-      overflow: hidden;
-      margin-bottom: 12px;
-    }
-
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #3b82f6, #10b981);
-      border-radius: 12px;
-      transition: width 0.3s ease;
-      box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
-    }
-
-    .progress-text {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.9rem;
-    }
-
-    .progress-status {
-      color: #3d4a5c;
-      font-weight: 600;
-    }
-
-    .progress-detail {
-      color: #607080;
-    }
-
-    /* ===== 扫描统计 ===== */
-    .scan-stats {
-      display: flex;
-      gap: 16px;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
-    }
-
-    .stat-item {
-      background: #eef2f5;
-      box-shadow: 4px 4px 8px #c0c8d0, -4px -4px 8px #ffffff;
-      border-radius: 16px;
-      padding: 12px 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-width: 80px;
-    }
-
-    .stat-label {
-      font-size: 0.8rem;
-      color: #607080;
-      margin-bottom: 4px;
-    }
-
-    .stat-value {
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: #3d4a5c;
-    }
-
-    .stat-value.buy-1,
-    .stat-value.buy-2,
-    .stat-value.buy-3 {
-      color: #e74c3c;
-    }
-
-    .stat-value.sell-1,
-    .stat-value.sell-2,
-    .stat-value.sell-3 {
-      color: #27ae60;
-    }
-
-    .stat-value.time {
-      font-size: 1rem;
-      font-weight: 500;
-    }
-
-    /* ===== 扫描结果 ===== */
-    .scan-results {
-      background: #eef2f5;
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border-radius: 24px;
-      padding: 20px;
-      /* 高度根据表格内容自动调整 */
-      height: auto;
-    }
-
-    /* ===== 空状态 ===== */
-    .empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 60px 20px;
-      color: #8090a0;
-    }
-
-    .empty-icon {
-      font-size: 4rem;
-      margin-bottom: 16px;
-      opacity: 0.5;
-    }
-
-    .empty-text {
-      font-size: 1.2rem;
-      font-weight: 500;
-      color: #607080;
-      margin-bottom: 8px;
-    }
-
-    .empty-hint {
-      font-size: 0.95rem;
-      color: #8090a0;
-    }
-
-    .hidden {
-      display: none !important;
-    }
-
-    /* 快捷操作区 */
-    .quick-actions {
-      display: flex;
-      gap: 16px;
-    }
-
-    .action-btn {
-      flex: 1;
-      background: #eef2f5;
-      box-shadow: 8px 8px 16px #c0c8d0, -8px -8px 16px #ffffff;
-      border-radius: 50px;
-      padding: 18px 24px;
-      border: none;
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #3d4a5c;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      transition: all 0.15s ease;
-    }
-
-    .action-btn:hover {
-      box-shadow: 10px 10px 20px #b0b8c0, -10px -10px 20px #ffffff;
-    }
-
-    .action-btn:active {
-      box-shadow: inset 4px 4px 8px #c0c8d0, inset -4px -4px 8px #ffffff;
-    }
-
-    .action-btn.primary {
-      background: linear-gradient(135deg, #eef2f5 0%, #e0e6ed 100%);
-    }
-
-    /* 系统状态 */
-    .system-status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.85rem;
-      color: #607080;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #27ae60;
-      box-shadow: inset 1px 1px 2px #1a8b4a, inset -1px -1px 2px #34c974;
-    }
-
-    .status-dot.warning {
-      background: #f39c12;
-    }
-
-    /* 底部信息 */
-    .sidebar-footer {
-      margin-top: auto;
-      padding: 16px;
-      opacity: 0.6;
-      font-size: 0.9rem;
-      color: #607080;
-      text-align: center;
-      border-top: 2px solid rgba(192, 200, 208, 0.3);
-    }
-
-    .hidden {
-      display: none !important;
-    }
-
-    /* ===== 个股分析页面样式 ===== */
-    /* 个股分析卡片特殊处理 */
-    #individual {
-      width: 100%;
-      height: 100%;
-      overflow-y: auto;
-      padding: 10px;
-    }
-
-    .individual-content {
-      width: 100%;
-      max-width: 100%;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    /* 输入区域 */
-    .stock-input-section {
-      display: flex;
-      gap: 16px;
-      align-items: flex-end;
-      margin-bottom: 10px;
-    }
-
-    .input-group {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .input-group label {
-      font-size: 0.9rem;
-      color: #607080;
-      font-weight: 500;
-    }
-
-    .stock-input {
-      background: linear-gradient(145deg, #f5f8fb, #e5eaf0);
-      box-shadow: inset 4px 4px 8px #c8d0d8, inset -4px -4px 8px #ffffff;
-      border: 2px solid transparent;
-      border-radius: 24px;
-      padding: 14px 24px;
-      font-size: 1.1rem;
-      color: #3d4a5c;
-      font-family: 'Consolas', monospace;
-      width: 180px;
-      outline: none;
-      transition: all 0.2s ease;
-    }
-
-    .stock-input:focus {
-      background: linear-gradient(145deg, #ffffff, #f5f8fb);
-      box-shadow: inset 6px 6px 12px #b8c0c8, inset -6px -6px 12px #ffffff,
-                  0 0 0 3px rgba(59, 130, 246, 0.1);
-      border-color: rgba(59, 130, 246, 0.3);
-    }
-
-    .stock-input::placeholder {
-      color: #a0b0c0;
-    }
-
-    .analyze-btn {
-      background: linear-gradient(145deg, #f5f8fb, #e5eaf0);
-      box-shadow: 8px 8px 16px #c8d0d8, -8px -8px 16px #ffffff,
-                  inset 0 1px 0 rgba(255, 255, 255, 0.8);
-      border: none;
-      border-radius: 50px;
-      padding: 14px 32px;
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #3d4a5c;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      transition: all 0.2s ease;
-      position: relative;
-      overflow: hidden;
-    }
-
-    /* 按钮光泽效果 */
-    .analyze-btn::before {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* === 背景纹理 === */
+    body::before {
       content: '';
-      position: absolute;
+      position: fixed;
       top: 0;
-      left: -100%;
+      left: 0;
       width: 100%;
       height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
-      transition: left 0.6s ease;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 50px 50px;
+      pointer-events: none;
+      z-index: 0;
     }
 
-    .analyze-btn:hover::before {
-      left: 100%;
+    /* === 主容器 === */
+    .app-container {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
-    .analyze-btn:hover {
-      background: linear-gradient(145deg, #e8f2fc, #d8e8f5);
-      box-shadow: 10px 10px 20px #b8c0c8, -10px -10px 20px #ffffff;
-      transform: translateY(-1px);
+    /* === 顶部导航栏 === */
+    .top-nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10, 10, 10, 0.95);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-medium);
+      padding: var(--space-md) var(--space-lg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
 
-    .analyze-btn:active {
-      box-shadow: inset 4px 4px 10px #c8d0d8, inset -4px -4px 10px #ffffff;
-      transform: translateY(0);
+    .app-logo {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
     }
 
-    .analyze-btn:disabled {
-      background: linear-gradient(145deg, #eef2f5, #e8eef2);
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none;
+    .app-logo::before {
+      content: '纏';
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      background: var(--zhu-red);
+      border-radius: var(--radius-sm);
+      font-size: 0.9rem;
+      color: white;
     }
 
-    .analyze-btn:disabled::before {
+    /* === 导航标签栏 === */
+    .nav-tabs {
+      display: flex;
+      gap: var(--space-sm);
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      padding: var(--space-xs);
+    }
+
+    .nav-tabs::-webkit-scrollbar {
       display: none;
     }
 
-    /* 分析师行 */
-    .analysts-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
-
-    /* 分析师卡片 */
-    .analyst-card {
-      background: #eef2f5;
-      box-shadow: 8px 8px 16px #c0c8d0, -8px -8px 16px #ffffff;
-      border-radius: 28px;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      transition: all 0.2s ease;
-    }
-
-    /* 分析师A - 蓝色系 */
-    .analysts-row .analyst-card:first-child {
-      border: 1px solid rgba(59, 130, 246, 0.15);
-      box-shadow: 8px 8px 16px rgba(59, 130, 246, 0.08),
-                  -8px -8px 16px #ffffff,
-                  inset 0 1px 0 rgba(59, 130, 246, 0.05);
-    }
-
-    /* 分析师B - 绿色系 */
-    .analysts-row .analyst-card:last-child {
-      border: 1px solid rgba(16, 185, 129, 0.15);
-      box-shadow: 8px 8px 16px rgba(16, 185, 129, 0.08),
-                  -8px -8px 16px #ffffff,
-                  inset 0 1px 0 rgba(16, 185, 129, 0.05);
-    }
-
-    /* 分析师标题颜色 */
-    .analysts-row .analyst-card:first-child .analyst-title {
-      color: #2b4a7a;
-    }
-
-    .analysts-row .analyst-card:last-child .analyst-title {
-      color: #0d5a4a;
-    }
-
-    .analyst-header {
-      margin-bottom: 16px;
-    }
-
-    .analyst-title {
-      font-size: 1.2rem;
-      font-weight: 600;
-      color: #3d4a5c;
-    }
-
-    /* 温度控制 */
-    .temperature-control {
-      background: #eef2f5;
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border-radius: 20px;
-      padding: 14px 18px;
-      margin-bottom: 16px;
-    }
-
-    .temp-label-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-
-    .temp-label {
+    .nav-tab {
+      flex-shrink: 0;
+      padding: var(--space-sm) var(--space-md);
       font-size: 0.85rem;
-      color: #607080;
       font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
     }
 
-    .temp-value {
-      font-size: 1rem;
-      font-weight: 600;
-      color: #3d4a5c;
-      font-family: 'Consolas', monospace;
+    .nav-tab:active {
+      transform: scale(0.96);
     }
 
-    /* 温度滑块样式 */
-    .temp-slider {
-      -webkit-appearance: none;
-      appearance: none;
+    .nav-tab.active {
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+      border-color: var(--border-medium);
+    }
+
+    /* === 内容区域 === */
+    .content-area {
+      flex: 1;
+      padding: var(--space-lg);
+      max-width: 1200px;
+      margin: 0 auto;
       width: 100%;
-      height: 12px;
-      background: linear-gradient(90deg, #dbeafe 0%, #d1fae5 50%, #fed7aa 100%);
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border-radius: 10px;
-      outline: none;
-      margin: 8px 0;
     }
 
-    .temp-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 24px;
-      height: 24px;
-      background: linear-gradient(145deg, #ffffff, #f0f5fa);
-      box-shadow: 4px 4px 8px rgba(0,0,0,0.08),
-                  -4px -4px 8px #ffffff,
-                  inset 0 -2px 4px rgba(0,0,0,0.03);
-      border: 2px solid #e8f0f8;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: all 0.15s ease;
+    /* === 页面容器 === */
+    .page {
+      display: none;
+      animation: fadeIn 0.3s ease;
     }
 
-    .temp-slider::-webkit-slider-thumb:hover {
-      box-shadow: 5px 5px 10px rgba(59, 130, 246, 0.15),
-                  -5px -5px 10px #ffffff;
-      transform: scale(1.08);
-      border-color: rgba(59, 130, 246, 0.3);
+    .page.active {
+      display: block;
     }
 
-    .temp-slider::-moz-range-thumb {
-      width: 24px;
-      height: 24px;
-      background: linear-gradient(145deg, #ffffff, #f0f5fa);
-      box-shadow: 4px 4px 8px rgba(0,0,0,0.08),
-                  -4px -4px 8px #ffffff,
-                  inset 0 -2px 4px rgba(0,0,0,0.03);
-      border: 2px solid #e8f0f8;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .temp-slider::-moz-range-thumb:hover {
-      box-shadow: 5px 5px 10px rgba(59, 130, 246, 0.15),
-                  -5px -5px 10px #ffffff;
-      transform: scale(1.08);
-      border-color: rgba(59, 130, 246, 0.3);
-    }
-
-    /* 温度值颜色 */
-    .temp-value[data-temp="low"] { color: #3b82f6; }
-    .temp-value[data-temp="medium"] { color: #10b981; }
-    .temp-value[data-temp="high"] { color: #f59e0b; }
-
-    .temp-extremes {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.75rem;
-      color: #8090a0;
-      margin-top: 4px;
-    }
-
-    /* 分析师输出区域 */
-    .analyst-output {
-      background: #eef2f5;
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border-radius: 20px;
-      padding: 18px;
-      min-height: 200px;
-      overflow: visible;
-      height: auto;
-      color: #2d3a4c;
-      font-size: 0.95rem;
-      font-weight: 500;
-      line-height: 1.8;
-      white-space: pre-wrap;
-      word-break: break-word;
-      transition: all 0.3s ease;
-    }
-
-    /* 分析师A - 数字高亮（蓝色系） */
-    .analysts-row .analyst-card:first-child .analyst-output {
-      color: #2a4a6a;
-    }
-
-    .analysts-row .analyst-card:first-child .analyst-output .num-highlight {
-      color: #3b82f6;
-      font-weight: 600;
-      padding: 0 2px;
-    }
-
-    /* 分析师B - 数字高亮（绿色系） */
-    .analysts-row .analyst-card:last-child .analyst-output {
-      color: #0a4a3a;
-    }
-
-    .analysts-row .analyst-card:last-child .analyst-output .num-highlight {
-      color: #10b981;
-      font-weight: 600;
-      padding: 0 2px;
-    }
-
-    /* 关键词高亮 */
-    .analyst-output .keyword {
-      color: #6366f1;
-      font-weight: 500;
-    }
-
-    .analyst-output .keyword-buy {
-      color: #ef4444;
-      font-weight: 600;
-    }
-
-    .analyst-output .keyword-sell {
-      color: #22c55e;
-      font-weight: 600;
-    }
-
-    /* 淡入动画 */
-    .analyst-output[data-has-content="true"] {
-      animation: fadeInUp 0.4s ease;
-    }
-
-    @keyframes fadeInUp {
+    @keyframes fadeIn {
       from {
         opacity: 0;
-        transform: translateY(10px);
+        transform: translateY(8px);
       }
       to {
         opacity: 1;
@@ -873,1276 +228,2000 @@
       }
     }
 
-    .output-placeholder {
-      color: #a0b0c0;
-      font-style: italic;
-      text-align: center;
-      padding: 60px 20px;
-      position: relative;
+    /* === 卡片组件 === */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: var(--space-lg);
+      margin-bottom: var(--space-lg);
     }
 
-    .output-placeholder::before {
-      content: '✨';
-      display: block;
-      font-size: 2.5rem;
-      margin-bottom: 12px;
-      opacity: 0.4;
-    }
-
-    /* 决策者区域 */
-    .decision-maker-section {
-      background: #eef2f5;
-      box-shadow: 8px 8px 16px #c0c8d0, -8px -8px 16px #ffffff;
-      border-radius: 28px;
-      padding: 20px;
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: var(--space-md);
       display: flex;
-      flex-direction: column;
-      border: 1px solid rgba(139, 92, 246, 0.15);
-      box-shadow: 10px 10px 20px rgba(139, 92, 246, 0.08),
-                  -10px -10px 20px #ffffff,
-                  inset 0 1px 0 rgba(139, 92, 246, 0.05);
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    /* === 输入组件 === */
+    .input-group {
+      margin-bottom: var(--space-md);
+    }
+
+    .input-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      margin-bottom: var(--space-sm);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .input-field {
+      width: 100%;
+      padding: var(--space-md);
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      outline: none;
       transition: all 0.2s ease;
     }
 
-    /* 决策者标题颜色 */
-    .decision-title {
-      color: #4a3a7a;
+    .input-field:focus {
+      border-color: var(--zhu-red);
+      box-shadow: 0 0 0 3px var(--zhu-red-dim);
     }
 
-    .decision-header {
-      margin-bottom: 16px;
+    .input-field::placeholder {
+      color: var(--text-tertiary);
     }
 
-    .decision-title {
-      font-size: 1.3rem;
-      font-weight: 600;
-      color: #3d4a5c;
-    }
-
-    .decision-output {
-      background: #eef2f5;
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff;
-      border-radius: 20px;
-      padding: 18px;
-      min-height: 200px;
-      overflow: visible;
-      height: auto;
-      color: #3a3a5a;
-      font-size: 1rem;
-      font-weight: 550;
-      line-height: 1.85;
-      white-space: pre-wrap;
-      word-break: break-word;
-      transition: all 0.3s ease;
-    }
-
-    /* 决策者 - 数字高亮（紫色系） */
-    .decision-output .num-highlight {
-      color: #8b5cf6;
-      font-weight: 600;
-      padding: 0 2px;
-    }
-
-    .decision-output .keyword {
-      color: #6366f1;
-      font-weight: 500;
-    }
-
-    .decision-output .recommendation {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-weight: 600;
-      margin: 0 2px;
-    }
-
-    .decision-output .recommend-buy {
-      background: linear-gradient(145deg, #fecaca, #fca5a5);
-      color: #991b1b;
-    }
-
-    .decision-output .recommend-sell {
-      background: linear-gradient(145deg, #bbf7d0, #86efac);
-      color: #064e3b;
-    }
-
-    .decision-output .recommend-hold {
-      background: linear-gradient(145deg, #fef3c7, #fde68a);
-      color: #78350f;
-    }
-
-    /* 决策输出淡入动画 */
-    .decision-output[data-has-content="true"] {
-      animation: fadeInUp 0.4s ease;
-    }
-
-    /* 耗时统计 */
-    .timing-info {
-      text-align: center;
-      padding: 14px 24px;
-      background: linear-gradient(135deg, rgba(238, 242, 245, 0.95), rgba(232, 240, 248, 0.95));
-      box-shadow: inset 3px 3px 6px #c0c8d0, inset -3px -3px 6px #ffffff,
-                  0 1px 0 rgba(255, 255, 255, 0.5);
-      border-radius: 50px;
+    /* === 按钮组件 === */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-sm);
+      padding: var(--space-md) var(--space-lg);
       font-size: 0.9rem;
-      color: #607080;
-    }
-
-    .timing-info span {
-      color: #3d4a5c;
       font-weight: 600;
-      font-family: 'Consolas', monospace;
+      border: none;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.2s ease;
     }
 
-    .timing-info #analysts-time { color: #3b82f6; }
-    .timing-info #decision-time { color: #8b5cf6; }
-    .timing-info #total-time { color: #10b981; }
+    .btn:active {
+      transform: scale(0.96);
+    }
 
-    /* 加载动画 */
-    .loading {
+    .btn-primary {
+      background: var(--zhu-red);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--zhu-red-light);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-full {
+      width: 100%;
+    }
+
+    /* === Checkbox 选项 === */
+    .checkbox-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-sm);
+    }
+
+    .checkbox-item {
+      flex: 0 0 calc(50% - var(--space-xs));
+      padding: var(--space-sm) var(--space-md);
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.2s ease;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
-      color: #8090a0;
-      padding: 40px 20px;
+      gap: var(--space-xs);
     }
 
-    .loading::before {
-      content: '';
-      width: 20px;
-      height: 20px;
-      border: 3px solid #e8f0f8;
-      border-top-color: #607080;
-      border-radius: 50%;
-      animation: pulse-spin 1.2s ease-in-out infinite;
+    .checkbox-item:active {
+      transform: scale(0.96);
     }
 
-    @keyframes pulse-spin {
-      0% { transform: rotate(0deg) scale(1); }
-      50% { transform: rotate(180deg) scale(1.1); }
-      100% { transform: rotate(360deg) scale(1); }
+    .checkbox-item input {
+      display: none;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    .checkbox-item.selected {
+      color: var(--text-primary);
+      background: var(--zhu-red-dim);
+      border-color: var(--zhu-red);
     }
 
-    /* ===== 缠论说明页面样式 ===== */
-    .chan-content {
-      padding: 20px;
-    }
-
-    .chan-section {
-      margin-bottom: 32px;
-    }
-
-    .chan-section-title {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 1.3rem;
-      font-weight: 600;
-      color: #3d4a5c;
-      margin-bottom: 16px;
-    }
-
-    .title-icon {
-      font-size: 1.5rem;
-    }
-
-    /* 买卖点对比网格 */
-    .bsp-compare-grid {
+    /* === 分析师卡片 === */
+    .analyst-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-    }
-
-    .sell-compare {
       grid-template-columns: 1fr;
+      gap: var(--space-md);
+      margin-bottom: var(--space-lg);
     }
 
-    .bsp-compare-card {
-      background: #eef2f5;
-      box-shadow: 6px 6px 12px #c0c8d0, -6px -6px 12px #ffffff;
-      border-radius: 20px;
-      padding: 20px 16px;
-      text-align: center;
-      transition: all 0.3s ease;
-      cursor: pointer;
-      position: relative;
-    }
-
-    .bsp-compare-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 8px 8px 16px #b8c0c8, -8px -8px 16px #ffffff;
-    }
-
-    .bsp-compare-card.recommended {
-      border: 2px solid #3b82f6;
-    }
-
-    .bsp-recommend {
-      position: absolute;
-      top: -8px;
-      right: -8px;
-      background: linear-gradient(145deg, #3b82f6, #2563eb);
-      color: white;
-      font-size: 0.7rem;
-      font-weight: 600;
-      padding: 4px 8px;
-      border-radius: 12px;
-      box-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .bsp-type-name {
-      font-size: 1.1rem;
-      font-weight: 700;
-      color: #3d4a5c;
-      margin-bottom: 4px;
-    }
-
-    .bsp-type-sub {
-      font-size: 0.8rem;
-      color: #7a8b9f;
-      margin-bottom: 12px;
-    }
-
-    .bsp-pattern {
-      font-size: 1.4rem;
-      margin-bottom: 12px;
-      letter-spacing: 2px;
-    }
-
-    .bsp-risk {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-
-    .risk-low {
-      background: linear-gradient(145deg, #d4edda, #c3e6cb);
-      color: #155724;
-    }
-
-    .risk-medium {
-      background: linear-gradient(145deg, #fff3cd, #ffe9a0);
-      color: #856404;
-    }
-
-    .risk-high {
-      background: linear-gradient(145deg, #f8d7da, #f5c6cb);
-      color: #721c24;
-    }
-
-    .risk-extreme {
-      background: linear-gradient(145deg, #e2e3e5, #d6d8db);
-      color: #383d41;
-    }
-
-    .bsp-return {
-      font-size: 0.85rem;
-      color: #607080;
-      margin-bottom: 6px;
-    }
-
-    .bsp-stars {
-      font-size: 0.9rem;
-      color: #f59e0b;
-      margin-bottom: 8px;
-    }
-
-    .bsp-tag {
-      font-size: 0.8rem;
-      color: #5a6b7c;
-      padding: 4px 10px;
-      background: linear-gradient(145deg, #e8ecf1, #dce2e9);
-      border-radius: 12px;
-    }
-
-    .bsp-compare-card.sell-card {
-      background: linear-gradient(145deg, #fef3e2, #fde8d0);
-      box-shadow: 6px 6px 12px #e0c8a8, -6px -6px 12px #ffffff;
-    }
-
-    /* 手风琴详情区 */
-    .chan-detail-accordion {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .chan-detail-item {
-      background: #eef2f5;
-      box-shadow: 4px 4px 8px #c0c8d0, -4px -4px 8px #ffffff;
-      border-radius: 20px;
-      overflow: hidden;
-    }
-
-    .chan-detail-item.sell-item {
-      background: linear-gradient(145deg, #fef8f0, #fdf0e0);
-      box-shadow: 4px 4px 8px #e8d0b0, -4px -4px 8px #ffffff;
-    }
-
-    .chan-detail-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 16px 20px;
-      cursor: pointer;
-      user-select: none;
+    .analyst-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: var(--space-md);
       transition: all 0.2s ease;
     }
 
-    .chan-detail-header:hover {
-      background: rgba(59, 130, 246, 0.08);
+    .analyst-card:focus-within {
+      border-color: var(--border-medium);
     }
 
-    .chan-detail-header.recommended {
-      background: linear-gradient(145deg, #eff7ff, #e6f2ff);
+    .analyst-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-md);
+      padding-bottom: var(--space-md);
+      border-bottom: 1px solid var(--border-subtle);
     }
 
-    .detail-title {
+    .analyst-name {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .analyst-status {
+      font-size: 0.75rem;
+      color: var(--text-tertiary);
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+    }
+
+    .analyst-status.analyzing::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--zhu-red);
+      border-radius: 50%;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .analyst-output {
+      min-height: 120px;
+      max-height: none;
+      padding: var(--space-md);
+      font-size: 0.9rem;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      white-space: pre-wrap;
+      overflow-y: auto;
+    }
+
+    /* 分析提示 */
+    .analyze-tip {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      padding: var(--space-md);
+      background: linear-gradient(90deg, rgba(200, 55, 46, 0.15), rgba(200, 55, 46, 0.05));
+      border: 1px solid var(--zhu-red-dim);
+      border-radius: var(--radius-md);
+      margin-bottom: var(--space-lg);
+      animation: pulse-tip 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-tip {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.8;
+      }
+    }
+
+    .tip-icon {
+      font-size: 1.2rem;
+    }
+
+    .tip-text {
+      font-size: 0.9rem;
+      color: var(--zhu-red);
+      font-weight: 500;
+    }
+
+    .analyst-output.loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-tertiary);
+    }
+
+    /* === 温度滑块 === */
+    .temp-control {
+      margin-bottom: var(--space-md);
+    }
+
+    .temp-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--space-sm);
+    }
+
+    .temp-label {
+      font-size: 0.75rem;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .temp-value {
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      color: var(--zhu-red);
+      font-weight: 600;
+    }
+
+    .temp-slider {
+      width: 100%;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--bg-elevated);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .temp-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      background: var(--zhu-red);
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid var(--bg-card);
+    }
+
+    /* === 股票列表卡片 === */
+    .stock-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+    }
+
+    .stock-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: var(--space-md);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-xs);
+      transition: all 0.2s ease;
+    }
+
+    .stock-card:active {
+      transform: scale(0.98);
+      border-color: var(--border-medium);
+    }
+
+    .stock-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: var(--space-xs);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .stock-code {
+      font-family: var(--font-mono);
       font-size: 1rem;
       font-weight: 600;
-      color: #3d4a5c;
+      color: var(--zhu-red);
     }
 
-    .detail-badge {
-      background: linear-gradient(145deg, #3b82f6, #2563eb);
-      color: white;
+    .stock-name {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    .stock-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--space-xs) 0;
+      font-size: 0.85rem;
+    }
+
+    .stock-label {
+      color: var(--text-tertiary);
+    }
+
+    .stock-value {
+      font-family: var(--font-mono);
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .stock-signal {
+      display: inline-block;
+      padding: var(--space-xs) var(--space-sm);
       font-size: 0.75rem;
       font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 12px;
-      margin-right: 10px;
+      background: var(--zhu-red-dim);
+      color: var(--zhu-red);
+      border-radius: var(--radius-sm);
     }
 
-    .detail-toggle {
-      font-size: 0.85rem;
-      color: #607080;
-      transition: transform 0.3s ease;
+    .stock-signal.sell {
+      background: var(--fei-green-dim);
+      color: var(--fei-green);
     }
 
-    .detail-toggle.expanded {
-      transform: rotate(180deg);
+    /* === 统计卡片 === */
+    .stats-row {
+      display: flex;
+      gap: var(--space-sm);
+      overflow-x: auto;
+      padding: var(--space-sm) 0;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
     }
 
-    .chan-detail-content {
-      max-height: 0;
+    .stats-row::-webkit-scrollbar {
+      display: none;
+    }
+
+    .stat-card {
+      flex-shrink: 0;
+      min-width: 70px;
+      padding: var(--space-md);
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      text-align: center;
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      color: var(--text-tertiary);
+      margin-bottom: var(--space-xs);
+    }
+
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    /* === 进度条 === */
+    .progress-bar {
+      height: 3px;
+      background: var(--bg-elevated);
+      border-radius: 2px;
       overflow: hidden;
-      transition: max-height 0.3s ease;
+      margin-bottom: var(--space-md);
     }
 
-    .chan-detail-content.expanded {
-      max-height: 2000px;
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--zhu-red), var(--fei-green));
+      border-radius: 2px;
+      transition: width 0.3s ease;
     }
 
-    .detail-block {
-      padding: 12px 20px;
-      border-top: 1px solid rgba(192, 200, 208, 0.3);
-    }
-
-    .detail-block h5 {
-      font-size: 1rem;
-      color: #3b82f6;
-      margin-bottom: 8px;
-      font-weight: 600;
-    }
-
-    .detail-block p {
-      font-size: 1rem;
-      color: #607080;
-      line-height: 1.6;
-      margin-bottom: 8px;
-    }
-
-    .detail-note {
-      background: rgba(59, 130, 246, 0.08);
-      padding: 8px 12px;
-      border-radius: 10px;
-      font-size: 0.85rem;
-    }
-
-    .detail-block ul, .detail-block ol {
-      margin: 0;
-      padding-left: 20px;
-      font-size: 1rem;
-      color: #607080;
-      line-height: 1.6;
-    }
-
-    .detail-block li {
-      margin-bottom: 6px;
-    }
-
-    .recommend-tag {
-      background: linear-gradient(145deg, #d4edda, #c3e6cb);
-      color: #155724;
+    .progress-text {
+      display: flex;
+      justify-content: space-between;
       font-size: 0.8rem;
-      padding: 2px 8px;
-      border-radius: 8px;
-      margin-left: 8px;
+      color: var(--text-tertiary);
     }
 
-    /* 表格对比式样式 */
-    .bsp-compare-table {
+    /* === 空状态 === */
+    .empty-state {
+      text-align: center;
+      padding: var(--space-3xl) var(--space-lg);
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      margin-bottom: var(--space-md);
+      opacity: 0.3;
+    }
+
+    .empty-text {
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+      margin-bottom: var(--space-sm);
+    }
+
+    .empty-hint {
+      font-size: 0.8rem;
+      color: var(--text-tertiary);
+    }
+
+    /* === Select 选择器 === */
+    .select-field {
       width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      margin: 16px 0;
-      background: #eef2f5;
-      box-shadow: 6px 6px 12px #c0c8d0, -6px -6px 12px #ffffff;
-      border-radius: 20px;
-      overflow: hidden;
+      padding: var(--space-md);
+      font-size: 0.9rem;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%236b6b6b' d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right var(--space-md) center;
+      padding-right: var(--space-2xl);
     }
 
-    .bsp-compare-table th {
-      background: linear-gradient(145deg, #e8eef5, #dde5ef);
-      box-shadow: inset 2px 2px 4px #c0c8d0;
-      padding: 14px 12px;
-      font-size: 1rem;
-      color: #5a6b7c;
+    /* === 分割线 === */
+    .divider {
+      height: 1px;
+      background: var(--border-subtle);
+      margin: var(--space-lg) 0;
+    }
+
+    /* === 缠论说明页面 === */
+    .theory-section {
+      margin-bottom: var(--space-xl);
+    }
+
+    .theory-title {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
       font-weight: 600;
-      text-align: center;
-      border-bottom: 1px solid rgba(192, 200, 208, 0.3);
+      color: var(--text-primary);
+      margin-bottom: var(--space-md);
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
     }
 
-    .bsp-compare-table th:first-child {
-      border-top-left-radius: 20px;
+    .theory-title::before {
+      content: '';
+      width: 4px;
+      height: 20px;
+      background: var(--zhu-red);
+      border-radius: 2px;
     }
 
-    .bsp-compare-table th:last-child {
-      border-top-right-radius: 20px;
+    .theory-content {
+      font-size: 0.95rem;
+      line-height: 1.8;
+      color: var(--text-secondary);
     }
 
-    .bsp-compare-table td {
-      padding: 14px 12px;
-      text-align: center;
-      font-size: 1rem;
-      color: #3d4a5c;
-      border-bottom: 1px solid rgba(192, 200, 208, 0.15);
+    .theory-content p {
+      margin-bottom: var(--space-md);
     }
 
-    .bsp-compare-table tr:last-child td {
+    .theory-content ul {
+      padding-left: var(--space-lg);
+      margin-bottom: var(--space-md);
+    }
+
+    .theory-content li {
+      margin-bottom: var(--space-sm);
+    }
+
+    .highlight-box {
+      background: var(--bg-secondary);
+      border-left: 3px solid var(--zhu-red);
+      padding: var(--space-md);
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      margin: var(--space-md) 0;
+    }
+
+    .highlight-box.success {
+      border-left-color: var(--fei-green);
+    }
+
+    /* === 买卖点对比表格 === */
+    .bs-compare-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: var(--space-md);
+    }
+
+    .bs-compare-item {
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+    }
+
+    .bs-compare-type {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--zhu-red);
+      margin-bottom: var(--space-sm);
+    }
+
+    .bs-compare-type.sell {
+      color: var(--fei-green);
+    }
+
+    .bs-compare-desc {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* === 设置页面 === */
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--space-md) 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .setting-item:last-child {
       border-bottom: none;
     }
 
-    .bsp-compare-table tr:last-child td:first-child {
-      border-bottom-left-radius: 20px;
+    .setting-label {
+      font-size: 0.95rem;
+      color: var(--text-primary);
     }
 
-    .bsp-compare-table tr:last-child td:last-child {
-      border-bottom-right-radius: 20px;
+    .setting-desc {
+      font-size: 0.8rem;
+      color: var(--text-tertiary);
+      margin-top: var(--space-xs);
     }
 
-    .bsp-compare-table tr:hover td {
-      background: rgba(59, 130, 246, 0.05);
+    .setting-control {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
     }
 
-    .bsp-compare-table .row-label {
-      font-weight: 600;
-      color: #5a6b7c;
-      text-align: left;
+    /* 开关组件 */
+    .toggle-switch {
+      position: relative;
+      width: 48px;
+      height: 26px;
     }
 
-    /* 表格响应式 */
-    @media (max-width: 768px) {
-      .bsp-compare-table {
-        font-size: 0.8rem;
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-medium);
+      border-radius: 13px;
+      transition: all 0.2s ease;
+    }
+
+    .toggle-slider::before {
+      position: absolute;
+      content: '';
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: var(--text-tertiary);
+      border-radius: 50%;
+      transition: all 0.2s ease;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: var(--zhu-red);
+      border-color: var(--zhu-red);
+    }
+
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(22px);
+      background: white;
+    }
+
+    /* === 响应式 === */
+    @media (min-width: 768px) {
+      .content-area {
+        padding: var(--space-xl);
       }
 
-      .bsp-compare-table th,
-      .bsp-compare-table td {
-        padding: 10px 6px;
+      .analyst-grid {
+        grid-template-columns: repeat(2, 1fr);
       }
 
-      .bsp-compare-table .row-label {
-        min-width: 80px;
-      }
-    }
-
-    @media (max-width: 480px) {
-      .bsp-compare-table {
-        display: block;
-        overflow-x: auto;
+      .checkbox-item {
+        flex: 0 0 auto;
       }
 
-      .bsp-compare-table th,
-      .bsp-compare-table td {
-        padding: 8px 4px;
-        font-size: 0.75rem;
+      .stock-list {
+        gap: var(--space-md);
       }
-    }
 
-    /* 卡片响应式（保留原有） */
-    @media (max-width: 900px) {
-      .bsp-compare-grid {
+      .bs-compare-grid {
         grid-template-columns: repeat(2, 1fr);
       }
     }
 
-    @media (max-width: 600px) {
-      .bsp-compare-grid {
-        grid-template-columns: 1fr;
-      }
-      .chan-section-title {
-        font-size: 1.1rem;
-      }
+    /* === 滚动条样式 === */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
     }
 
-    /* 图表响应式 */
-    @media (max-width: 900px) {
-      .charts-row {
-        grid-template-columns: 1fr;
-      }
-
-      .chart-card {
-        min-height: 280px;
-      }
-
-      .chart-container {
-        height: 200px;
-      }
+    ::-webkit-scrollbar-track {
+      background: transparent;
     }
 
-    /* 小屏幕时改为上下堆叠 */
-    @media (max-width: 850px) {
-      .dashboard {
-        flex-direction: column;
-        height: auto;
-        gap: 20px;
-        padding: 20px;
-      }
-      .sidebar {
-        width: 100%;
-        height: auto;
-      }
-      .content-panel {
-        height: 600px;
-      }
-      .analysts-row {
-        grid-template-columns: 1fr;
-      }
-      .stock-input-section {
-        flex-direction: column;
-        align-items: stretch;
-      }
-      .stock-input {
-        width: 100%;
-      }
-      #individual {
-        padding: 5px;
-      }
-      .individual-content {
-        gap: 12px;
-      }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-medium);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--border-strong);
+    }
+
+    /* ============================================
+       分析师输出高亮样式
+       ============================================ */
+
+    /* 数字高亮 - 价格 */
+    .num-highlight {
+      color: #c8372e;
+      font-weight: 700;
+      font-family: var(--font-mono);
+    }
+
+    /* 买点关键词高亮 - 红色 */
+    .keyword-buy {
+      color: #c8372e;
+      font-weight: 700;
+      background: rgba(200, 55, 46, 0.12);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* 卖点关键词高亮 - 绿色 */
+    .keyword-sell {
+      color: #10b981;
+      font-weight: 700;
+      background: rgba(16, 185, 129, 0.12);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* 通用关键词高亮 */
+    .keyword {
+      color: #3b82f6;
+      font-weight: 600;
+    }
+
+    /* 建议类文字高亮 */
+    .recommendation {
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+
+    .recommend-buy {
+      color: #c8372e;
+      background: rgba(200, 55, 46, 0.15);
+    }
+
+    .recommend-sell {
+      color: #10b981;
+      background: rgba(16, 185, 129, 0.15);
+    }
+
+    .recommend-hold {
+      color: #f59e0b;
+      background: rgba(245, 158, 11, 0.15);
     }
   </style>
 </head>
 <body>
-  <div class="dashboard">
-    <!-- 左侧边栏：紧贴浏览器左侧 -->
-    <aside class="sidebar neumorph-card">
-      <div class="sidebar-header">
-        <h2>缠论分析系统</h2>
-        <p>支持多智能体分析，买卖点筛选</p>
-      </div>
-      <nav class="menu" id="menu">
-        <button class="menu-item active" data-target="individual">
-          <span class="icon">📈</span> 个股分析
-        </button>
-        <button class="menu-item" data-target="buy-scan">
-          <span class="icon">⚡</span> 买点扫描
-        </button>
-        <button class="menu-item" data-target="sell-scan">
-          <span class="icon">💰</span> 卖点扫描
-        </button>
-        <button class="menu-item" data-target="sector">
-          <span class="icon">🗂️</span> 行业筛选
-        </button>
-        <button class="menu-item" data-target="kline">
-          <span class="icon">📉</span> K线图表
-        </button>
-        <button class="menu-item" data-target="chan">
-          <span class="icon">🧩</span> 缠论说明
-        </button>
-        <button class="menu-item" data-target="settings">
-          <span class="icon">⚙️</span> 系统设置
-        </button>
-      </nav>
-      <div class="sidebar-footer">
-        v1.0.0 · Neumorphism Design
-      </div>
-    </aside>
+  <div class="app-container">
+    <!-- 顶部导航 -->
+    <header class="top-nav">
+      <div class="app-logo">缠论分析</div>
+    </header>
 
-    <!-- 右侧内容区域：自动填满剩余宽度，紧贴右侧 -->
-    <main class="content-panel neumorph-card">
-      <!-- 个股分析 -->
-      <div id="individual" class="content-card">
-        <div class="individual-content">
-          <!-- 输入区域 -->
-          <div class="stock-input-section">
-            <div class="input-group">
-              <label for="stock-code">股票代码</label>
-              <input type="text" id="stock-code" class="stock-input" placeholder="000001" maxlength="6" value="000001">
-            </div>
-            <button id="analyze-btn" class="analyze-btn">
-              <span>🚀</span> 开始分析
-            </button>
+    <!-- 导航标签 -->
+    <nav class="nav-tabs" id="navTabs">
+      <button class="nav-tab active" data-page="analysis">📈 个股分析</button>
+      <button class="nav-tab" data-page="buy-scan">⚡ 买点扫描</button>
+      <button class="nav-tab" data-page="sell-scan">💰 卖点扫描</button>
+      <button class="nav-tab" data-page="theory">📚 缠论说明</button>
+      <button class="nav-tab" data-page="settings">⚙️ 设置</button>
+    </nav>
+
+    <!-- 内容区域 -->
+    <main class="content-area">
+      <!-- 个股分析页面 -->
+      <div class="page active" id="page-analysis">
+        <!-- 分析提示 -->
+        <div class="analyze-tip" id="analyzeTip" style="display: none;">
+          <span class="tip-icon">⚡</span>
+          <span class="tip-text">分析进行中，请勿切换页面...</span>
+        </div>
+
+        <div class="card">
+          <div class="card-title">股票代码</div>
+          <div class="input-group">
+            <input type="text" class="input-field" id="stockCode" placeholder="输入代码，如 000001" maxlength="6" value="000001">
           </div>
+          <button class="btn btn-primary btn-full" id="analyzeBtn">
+            开始分析
+          </button>
+        </div>
 
-          <!-- 分析师区域 -->
-          <div class="analysts-row">
-            <!-- 分析师A -->
-            <div class="analyst-card">
-              <div class="analyst-header">
-                <span class="analyst-title">👤 分析师 A</span>
-              </div>
-              <div class="temperature-control">
-                <div class="temp-label-row">
-                  <span class="temp-label">温度</span>
-                  <span class="temp-value" id="temp-value-a">0.4</span>
-                </div>
-                <input type="range" class="temp-slider" id="temp-slider-a" min="0" max="1" step="0.1" value="0.4">
-                <div class="temp-extremes">
-                  <span>保守</span>
-                  <span>激进</span>
-                </div>
-              </div>
-              <div class="analyst-output" id="analyst-a-output">
-                <div class="output-placeholder">等待分析...</div>
-              </div>
+        <!-- 分析师区域 -->
+        <div class="analyst-grid">
+          <div class="analyst-card">
+            <div class="analyst-header">
+              <span class="analyst-name">分析师 A</span>
+              <span class="analyst-status" id="analystAStatus"></span>
             </div>
-
-            <!-- 分析师B -->
-            <div class="analyst-card">
-              <div class="analyst-header">
-                <span class="analyst-title">👤 分析师 B</span>
-              </div>
-              <div class="temperature-control">
-                <div class="temp-label-row">
-                  <span class="temp-label">温度</span>
-                  <span class="temp-value" id="temp-value-b">0.7</span>
-                </div>
-                <input type="range" class="temp-slider" id="temp-slider-b" min="0" max="1" step="0.1" value="0.7">
-                <div class="temp-extremes">
-                  <span>保守</span>
-                  <span>激进</span>
-                </div>
-              </div>
-              <div class="analyst-output" id="analyst-b-output">
-                <div class="output-placeholder">等待分析...</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 决策者区域 -->
-          <div class="decision-maker-section">
-            <div class="decision-header">
-              <span class="decision-title">🧠 决策者</span>
-            </div>
-            <div class="temperature-control">
-              <div class="temp-label-row">
+            <div class="temp-control">
+              <div class="temp-header">
                 <span class="temp-label">温度</span>
-                <span class="temp-value" id="temp-value-d">0.3</span>
+                <span class="temp-value" id="tempValueA">0.4</span>
               </div>
-              <input type="range" class="temp-slider" id="temp-slider-d" min="0" max="1" step="0.1" value="0.3">
-              <div class="temp-extremes">
-                <span>保守</span>
-                <span>激进</span>
-              </div>
+              <input type="range" class="temp-slider" id="tempSliderA" min="0" max="1" step="0.1" value="0.4">
             </div>
-            <div class="decision-output" id="decision-output">
-              <div class="output-placeholder">等待分析师完成...</div>
+            <div class="analyst-output" id="analystAOutput">
+              等待分析...
             </div>
           </div>
 
-          <!-- 耗时统计 -->
-          <div class="timing-info" id="timing-info" style="display: none;">
-            <span>⏱️ 耗时统计: 分析师 <span id="analysts-time">0.0</span>s | 决策者 <span id="decision-time">0.0</span>s | 总计 <span id="total-time">0.0</span>s</span>
+          <div class="analyst-card">
+            <div class="analyst-header">
+              <span class="analyst-name">分析师 B</span>
+              <span class="analyst-status" id="analystBStatus"></span>
+            </div>
+            <div class="temp-control">
+              <div class="temp-header">
+                <span class="temp-label">温度</span>
+                <span class="temp-value" id="tempValueB">0.7</span>
+              </div>
+              <input type="range" class="temp-slider" id="tempSliderB" min="0" max="1" step="0.1" value="0.7">
+            </div>
+            <div class="analyst-output" id="analystBOutput">
+              等待分析...
+            </div>
+          </div>
+        </div>
+
+        <!-- 决策者区域 -->
+        <div class="card">
+          <div class="card-title">🧠 决策者</div>
+          <div class="temp-control">
+            <div class="temp-header">
+              <span class="temp-label">温度</span>
+              <span class="temp-value" id="tempValueD">0.3</span>
+            </div>
+            <input type="range" class="temp-slider" id="tempSliderD" min="0" max="1" step="0.1" value="0.3">
+          </div>
+          <div class="analyst-output" id="decisionOutput">
+            等待分析师完成...
           </div>
         </div>
       </div>
 
-      <!-- 买点扫描 -->
-      <div id="buy-scan" class="content-card hidden">
-        <h3><span>⚡</span> 买点扫描</h3>
-        <div class="content-divider"></div>
+      <!-- 买点扫描页面 -->
+      <div class="page" id="page-buy-scan">
+        <div class="card">
+          <div class="card-title">扫描设置</div>
 
-        <!-- 扫描控制区 -->
-        <div class="scan-controls">
-          <div class="filter-group">
-            <label class="filter-label">买点类型</label>
-            <div class="checkbox-group">
-              <label class="checkbox-item">
+          <div class="input-group">
+            <label class="input-label">买点类型</label>
+            <div class="checkbox-group" id="buyTypesGroup">
+              <label class="checkbox-item selected">
                 <input type="checkbox" value="1" checked> 一买
               </label>
-              <label class="checkbox-item">
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="1p" checked> 一买衍生
+              </label>
+              <label class="checkbox-item selected">
                 <input type="checkbox" value="2" checked> 二买
               </label>
-              <label class="checkbox-item">
+              <label class="checkbox-item selected">
                 <input type="checkbox" value="3a" checked> 三买A
               </label>
-              <label class="checkbox-item">
+              <label class="checkbox-item selected">
                 <input type="checkbox" value="3b" checked> 三买B
               </label>
             </div>
           </div>
 
-          <div class="filter-group">
-            <label class="filter-label">扫描数量</label>
-            <select class="filter-select" id="buy-limit-select">
-              <option value="100">前100只</option>
-              <option value="500">前500只</option>
-              <option value="1000">前1000只</option>
+          <div class="input-group">
+            <label class="input-label">扫描数量</label>
+            <select class="select-field" id="buyLimit">
+              <option value="100">前 100 只</option>
+              <option value="500">前 500 只</option>
+              <option value="1000">前 1000 只</option>
               <option value="0">全市场</option>
             </select>
           </div>
 
-          <button class="action-btn primary" id="buy-scan-btn">
-            <span>🔍</span> 开始扫描买点
+          <button class="btn btn-primary btn-full" id="buyScanBtn">
+            🔍 开始扫描
           </button>
         </div>
 
-        <!-- 扫描进度区 -->
-        <div class="scan-progress" id="buy-scan-progress">
+        <!-- 扫描进度 -->
+        <div class="card" id="buyProgressCard" style="display: none;">
           <div class="progress-bar">
-            <div class="progress-fill" style="width: 0%"></div>
+            <div class="progress-fill" id="buyProgressFill" style="width: 0%"></div>
           </div>
           <div class="progress-text">
-            <span class="progress-status">准备就绪</span>
-            <span class="progress-detail">点击按钮开始扫描</span>
+            <span id="buyProgressStatus">扫描中...</span>
+            <span id="buyProgressDetail">0/0</span>
           </div>
         </div>
 
-        <!-- 扫描结果统计 -->
-        <div class="scan-stats" id="buy-scan-stats">
-          <div class="stat-item">
-            <span class="stat-label">找到股票</span>
-            <span class="stat-value">0</span>
+        <!-- 统计 -->
+        <div class="stats-row" id="buyStats" style="display: none;">
+          <div class="stat-card">
+            <div class="stat-label">找到</div>
+            <div class="stat-value" id="buyTotal">0</div>
           </div>
-          <div class="stat-item">
-            <span class="stat-label">一买</span>
-            <span class="stat-value buy-1">0</span>
+          <div class="stat-card">
+            <div class="stat-label">一买</div>
+            <div class="stat-value" id="buy1Count">0</div>
           </div>
-          <div class="stat-item">
-            <span class="stat-label">二买</span>
-            <span class="stat-value buy-2">0</span>
+          <div class="stat-card">
+            <div class="stat-label">一买衍</div>
+            <div class="stat-value" id="buy1pCount">0</div>
           </div>
-          <div class="stat-item">
-            <span class="stat-label">三买</span>
-            <span class="stat-value buy-3">0</span>
+          <div class="stat-card">
+            <div class="stat-label">二买</div>
+            <div class="stat-value" id="buy2Count">0</div>
           </div>
-          <div class="stat-item">
-            <span class="stat-label">扫描时间</span>
-            <span class="stat-value time">--</span>
+          <div class="stat-card">
+            <div class="stat-label">三买A</div>
+            <div class="stat-value" id="buy3aCount">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">三买B</div>
+            <div class="stat-value" id="buy3bCount">0</div>
           </div>
         </div>
 
-        <!-- 扫描结果表格 -->
-        <div class="scan-results">
-          <table class="stock-table" id="buy-results-table">
-            <thead>
-              <tr>
-                <th>股票代码</th>
-                <th>股票名称</th>
-                <th>当前价格</th>
-                <th>买点类型</th>
-                <th>信号日期</th>
-                <th>信号价格</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- 动态填充 -->
-            </tbody>
-          </table>
-          <div class="empty-state" id="buy-empty-state">
-            <div class="empty-icon">📊</div>
-            <div class="empty-text">暂无买点数据</div>
-            <div class="empty-hint">选择买点类型并点击"开始扫描买点"开始扫描</div>
-          </div>
+        <!-- 结果列表 -->
+        <div class="stock-list" id="buyResults">
+          <!-- 动态填充 -->
+        </div>
+
+        <div class="empty-state" id="buyEmpty">
+          <div class="empty-icon">📊</div>
+          <div class="empty-text">暂无买点数据</div>
+          <div class="empty-hint">选择买点类型并点击"开始扫描"</div>
         </div>
       </div>
 
-      <!-- 卖点扫描 -->
-      <div id="sell-scan" class="content-card hidden">
-        <h3><span>💰</span> 卖点扫描</h3>
-        <div class="content-divider"></div>
+      <!-- 卖点扫描页面 -->
+      <div class="page" id="page-sell-scan">
+        <div class="card">
+          <div class="card-title">扫描设置</div>
 
-        <!-- 扫描控制区 -->
-        <div class="scan-controls">
-          <div class="filter-group">
-            <label class="filter-label">卖点类型</label>
-            <div class="checkbox-group">
-              <label class="checkbox-item">
+          <div class="input-group">
+            <label class="input-label">卖点类型</label>
+            <div class="checkbox-group" id="sellTypesGroup">
+              <label class="checkbox-item selected">
                 <input type="checkbox" value="2s" checked> 二卖
               </label>
             </div>
-            <div style="font-size: 12px; color: #888; margin-top: 5px;">
-              注：当前仅支持二卖扫描
-            </div>
           </div>
 
-          <div class="filter-group">
-            <label class="filter-label">扫描数量</label>
-            <select class="filter-select" id="sell-limit-select">
-              <option value="100">前100只</option>
-              <option value="500">前500只</option>
-              <option value="1000">前1000只</option>
+          <div class="input-group">
+            <label class="input-label">扫描数量</label>
+            <select class="select-field" id="sellLimit">
+              <option value="100">前 100 只</option>
+              <option value="500">前 500 只</option>
+              <option value="1000">前 1000 只</option>
               <option value="0">全市场</option>
             </select>
           </div>
 
-          <button class="action-btn primary" id="sell-scan-btn">
-            <span>🔍</span> 开始扫描卖点
+          <button class="btn btn-primary btn-full" id="sellScanBtn">
+            🔍 开始扫描
           </button>
         </div>
 
-        <!-- 扫描进度区 -->
-        <div class="scan-progress" id="sell-scan-progress">
+        <!-- 扫描进度 -->
+        <div class="card" id="sellProgressCard" style="display: none;">
           <div class="progress-bar">
-            <div class="progress-fill" style="width: 0%"></div>
+            <div class="progress-fill" id="sellProgressFill" style="width: 0%"></div>
           </div>
           <div class="progress-text">
-            <span class="progress-status">准备就绪</span>
-            <span class="progress-detail">点击按钮开始扫描</span>
+            <span id="sellProgressStatus">扫描中...</span>
+            <span id="sellProgressDetail">0/0</span>
           </div>
         </div>
 
-        <!-- 扫描结果统计 -->
-        <div class="scan-stats" id="sell-scan-stats">
-          <div class="stat-item">
-            <span class="stat-label">找到股票</span>
-            <span class="stat-value">0</span>
+        <!-- 统计 -->
+        <div class="stats-row" id="sellStats" style="display: none;">
+          <div class="stat-card">
+            <div class="stat-label">找到</div>
+            <div class="stat-value" id="sellTotal">0</div>
           </div>
-          <div class="stat-item">
-            <span class="stat-label">二卖</span>
-            <span class="stat-value sell-2s">0</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">扫描时间</span>
-            <span class="stat-value time">--</span>
+          <div class="stat-card">
+            <div class="stat-label">二卖</div>
+            <div class="stat-value" id="sell2sCount">0</div>
           </div>
         </div>
 
-        <!-- 扫描结果表格 -->
-        <div class="scan-results">
-          <table class="stock-table" id="sell-results-table">
-            <thead>
-              <tr>
-                <th>股票代码</th>
-                <th>股票名称</th>
-                <th>当前价格</th>
-                <th>卖点类型</th>
-                <th>信号日期</th>
-                <th>信号价格</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- 动态填充 -->
-            </tbody>
-          </table>
-          <div class="empty-state" id="sell-empty-state">
-            <div class="empty-icon">📊</div>
-            <div class="empty-text">暂无卖点数据</div>
-            <div class="empty-hint">选择卖点类型并点击"开始扫描卖点"开始扫描</div>
-          </div>
+        <!-- 结果列表 -->
+        <div class="stock-list" id="sellResults">
+          <!-- 动态填充 -->
+        </div>
+
+        <div class="empty-state" id="sellEmpty">
+          <div class="empty-icon">📊</div>
+          <div class="empty-text">暂无卖点数据</div>
+          <div class="empty-hint">点击"开始扫描"查找卖点</div>
         </div>
       </div>
 
-      <!-- 行业筛选 -->
-      <div id="sector" class="content-card hidden">
-        <h3><span>🗂️</span> 行业筛选</h3>
-        <div class="content-divider"></div>
-        <div class="placeholder-content">
-          <div class="placeholder-icon">🚧</div>
-          <div class="placeholder-title">后续开发敬请期待</div>
-          <div class="placeholder-desc">功能正在开发中，敬请期待...</div>
-        </div>
-      </div>
-
-      <!-- K线图表 -->
-      <div id="kline" class="content-card hidden">
-        <h3><span>📉</span> K线图表</h3>
-        <div class="content-divider"></div>
-        <div class="placeholder-content">
-          <div class="placeholder-icon">🚧</div>
-          <div class="placeholder-title">后续开发敬请期待</div>
-          <div class="placeholder-desc">功能正在开发中，敬请期待...</div>
-        </div>
-      </div>
-
-      <!-- 缠论说明 -->
-      <div id="chan" class="content-card hidden">
-        <h3><span>🧩</span> 缠论说明</h3>
-        <div class="content-divider"></div>
-        <div class="chan-content">
-          <!-- 买点对比概览 -->
-          <div class="chan-section">
-            <h4 class="chan-section-title">
-              <span class="title-icon">📈</span>
-              买点对比概览
-            </h4>
-            <table class="bsp-compare-table">
-              <thead>
-                <tr>
-                  <th>买点类型</th>
-                  <th>一买</th>
-                  <th>二买 <span class="recommend-tag">推荐</span></th>
-                  <th>三买</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td class="row-label">📍 定位</td>
-                  <td>趋势终结</td>
-                  <td>趋势确认</td>
-                  <td>趋势加速</td>
-                </tr>
-                <tr>
-                  <td class="row-label">💰 核心优势</td>
-                  <td>利润有保证</td>
-                  <td>安全性高</td>
-                  <td>主升浪开启</td>
-                </tr>
-                <tr>
-                  <td class="row-label">⚠️ 主要难点</td>
-                  <td>背了又背</td>
-                  <td>位置灵活</td>
-                  <td>成本较高</td>
-                </tr>
-                <tr>
-                  <td class="row-label">📊 风险等级</td>
-                  <td><span class="risk-badge risk-low">中低</span></td>
-                  <td><span class="risk-badge risk-medium">中</span></td>
-                  <td><span class="risk-badge risk-high">中高</span></td>
-                </tr>
-                <tr>
-                  <td class="row-label">⭐ 推荐指数</td>
-                  <td>★★★</td>
-                  <td>★★★★</td>
-                  <td>★★</td>
-                </tr>
-              </tbody>
-            </table>
+      <!-- 缠论说明页面 -->
+      <div class="page" id="page-theory">
+        <div class="card">
+          <div class="theory-title">缠论基础</div>
+          <div class="theory-content">
+            <p>缠论（缠中说禅）是由缠中说禅（缠师）创立的一套股票市场技术分析理论体系，以分型、笔、线段、中枢等概念为核心，通过严格的数学定义来分析市场走势。</p>
           </div>
+        </div>
 
-          <!-- 卖点对比概览 -->
-          <div class="chan-section">
-            <h4 class="chan-section-title">
-              <span class="title-icon">💰</span>
-              卖点对比概览
-            </h4>
-            <table class="bsp-compare-table">
-              <thead>
-                <tr>
-                  <th>卖点类型</th>
-                  <th>二卖</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td class="row-label">📍 定位</td>
-                  <td>趋势确认（上涨趋势结束确认）</td>
-                </tr>
-                <tr>
-                  <td class="row-label">🔍 定义</td>
-                  <td>一卖后反弹不创新高</td>
-                </tr>
-                <tr>
-                  <td class="row-label">💡 操作建议</td>
-                  <td>获利了结，保护利润</td>
-                </tr>
-                <tr>
-                  <td class="row-label">⚠️ 风险提示</td>
-                  <td>若突破一卖高点，趋势可能延续</td>
-                </tr>
-                <tr>
-                  <td class="row-label">📊 风险等级</td>
-                  <td><span class="risk-badge risk-medium">中</span></td>
-                </tr>
-                <tr>
-                  <td class="row-label">⭐ 推荐指数</td>
-                  <td>★★★</td>
-                </tr>
-              </tbody>
-            </table>
+        <div class="theory-section">
+          <div class="theory-title">核心概念</div>
+          <div class="theory-content">
+            <ul>
+              <li><strong>分型</strong>：由三根K线组成，包括顶分型和底分型，是走势转折的基本形态</li>
+              <li><strong>笔</strong>：连接相邻的顶分型和底分型，是缠论分析的基本单位</li>
+              <li><strong>线段</strong>：由至少三笔组成，笔的延伸形态</li>
+              <li><strong>中枢</strong>：由至少三个连续有重叠的线段构成，是判断走势的关键</li>
+            </ul>
           </div>
+        </div>
 
-          <!-- 详细知识区（手风琴） -->
-          <div class="chan-section">
-            <h4 class="chan-section-title">
-              <span class="title-icon">📚</span>
-              详细知识
-            </h4>
-            <div class="chan-detail-accordion">
-              <!-- 一买详情 -->
-              <div class="chan-detail-item">
-                <div class="chan-detail-header">
-                  <span class="detail-title">📍 一买 (第一类买点) - 趋势的终结者</span>
-                  <span class="detail-toggle">展开 ▼</span>
-                </div>
-                <div class="chan-detail-content">
-                  <div class="detail-block">
-                    <h5>📖 核心定义</h5>
-                    <p>第一类买点，是某级别<strong>下跌趋势中，最后一个中枢被突破后形成的趋势背驰点</strong>。简单来说，就是在一波猛烈的下跌后，空方力量衰竭，多方开始反击的那个最原始、最低的位置。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>📍 具体位置</h5>
-                    <p>它只出现在<strong>至少两个同向中枢之后</strong>的创新低位置。因此，第一类买点一定是在中枢的下方。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💎 特点与难点</h5>
-                    <p><strong>最大特点："利润有保证"</strong> — 因为趋势背驰后，价格至少会拉回原来的最后一个中枢区间。</p>
-                    <p><strong>难点："反复无常"</strong> — 在极端行情中，可能会出现"背了又背"的情况，即多次出现背驰信号后，真正的转折才到来。这对交易者的耐心和资金管理能力是极大的考验。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>🎯 识别要点</h5>
-                    <ul>
-                      <li>确认下跌趋势，至少完成两个同向中枢</li>
-                      <li>最后一个中枢被向下突破</li>
-                      <li>突破段出现趋势背驰（创新低但力度衰减）</li>
-                      <li>等待背驰后的向上转折确认</li>
-                    </ul>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💡 操作建议</h5>
-                    <p><strong>交易性质：</strong>左侧交易，逆势抄底，买在最便宜的转折点。</p>
-                    <p><strong>建仓策略：</strong>建议分批建仓，首次背驰确认时轻仓试探，二买确认后再加仓。</p>
-                    <p><strong>注意事项：</strong>需要忍受"背了又背"的煎熬，严格控制止损，耐心等待真正的转折。</p>
-                  </div>
-                </div>
+        <div class="theory-section">
+          <div class="theory-title">买卖点类型</div>
+          <div class="bs-compare-grid">
+            <div class="bs-compare-item">
+              <div class="bs-compare-type">第一类买点 (一买)</div>
+              <div class="bs-compare-desc">
+                下跌趋势中，最后一个中枢下沿出现的背驰点。这是下跌趋势结束、上涨趋势开始的转折点，风险最小但识别难度高。
               </div>
-
-              <!-- 二买详情 -->
-              <div class="chan-detail-item">
-                <div class="chan-detail-header recommended">
-                  <span class="detail-badge">⭐ 推荐</span>
-                  <span class="detail-title">📍 二买 (第二类买点) - 趋势的确认者</span>
-                  <span class="detail-toggle">展开 ▼</span>
-                </div>
-                <div class="chan-detail-content">
-                  <div class="detail-block">
-                    <h5>📖 核心定义</h5>
-                    <p>如果说第一类买点是"左侧交易"的尝试，那么第二类买点就是"<strong>右侧交易</strong>"的确认。</p>
-                    <p>第二类买点，是指<strong>第一类买点出现后，价格反弹，随后再次回落（但不创新低）的那个次级别走势的结束点</strong>。它本质上是对第一类买点所提示的"趋势转折"进行的一次确认。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>📍 具体位置</h5>
-                    <p>它的位置比较灵活，<strong>可以在中枢的下方、内部或上方</strong>：</p>
-                    <ul>
-                      <li><strong>在中枢下方出现</strong>：意味着反弹力度很弱，未来很可能形成更复杂的盘整</li>
-                      <li><strong>在中枢内部出现</strong>：力度中性，方向待定</li>
-                      <li><strong>在中枢上方出现</strong>：意味着反弹力度很强，未来行情可期</li>
-                    </ul>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💎 三种强弱情况</h5>
-                    <p><strong>最强：</strong>第二类买点恰好构成原来下跌最后一个中枢的第三类买点（即第二、三类买点重合）。这通常对应着V型反转，走势最为强劲。</p>
-                    <p><strong>最弱：</strong>第二类买点跌破第一类买点的位置。这种情况是允许的，但之后往往演化为更复杂的盘整。</p>
-                    <p><strong>一般性：</strong>第一、二类买点依次向上，一个比一个高，这是最常见的走势。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💡 操作建议</h5>
-                    <p><strong>交易性质：</strong>右侧交易，顺势确认，买在趋势刚刚确立后的回调点。</p>
-                    <p><strong>建仓策略：</strong>确认度高时可重仓介入。回调至支撑位时分批买入。</p>
-                    <p><strong>适用场景：</strong>波段操作首选，趋势确认后的入场机会，适合大多数投资者。</p>
-                  </div>
-                </div>
+            </div>
+            <div class="bs-compare-item">
+              <div class="bs-compare-type">第二类买点 (二买)</div>
+              <div class="bs-compare-desc">
+                第一类买点之后，回调不破前低形成的买点。安全性较高，是实际操作中最重要的买点类型。
               </div>
-
-              <!-- 三买详情 -->
-              <div class="chan-detail-item">
-                <div class="chan-detail-header">
-                  <span class="detail-title">📍 三买 (第三类买点) - 趋势的加速器</span>
-                  <span class="detail-toggle">展开 ▼</span>
-                </div>
-                <div class="chan-detail-content">
-                  <div class="detail-block">
-                    <h5>📖 核心定义</h5>
-                    <p>第三类买点，是指<strong>一个走势向上离开中枢，随后以一个次级别走势回抽，但其低点不再跌回中枢区间之内</strong>。这标志着中枢的结束，新的上涨趋势正式形成。</p>
-                    <p class="detail-note">第三类卖点则是向下离开中枢后，反弹高点无法回到中枢区间。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>📍 具体位置</h5>
-                    <p>它<strong>只能出现在中枢的上方</strong>（买点）或下方（卖点）。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💎 特点与优势</h5>
-                    <p><strong>中枢结束的标志：</strong>一旦出现，意味着之前的盘整或震荡区域被彻底甩在身后，走势将进入b段的快速脱离阶段。</p>
-                    <p><strong>主升浪信号：</strong>这个阶段往往是一轮行情中涨幅最大、最流畅的部分。一个第三类买点的出现，常常预示着主升浪的开启。</p>
-                    <p><strong>多重性：</strong>在一个强势的上涨趋势中，可能会多次出现第三类买点。每一次回抽不触及上一个中枢，都是一个新的买入机会，直到最后被第三类卖点终结。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💡 操作建议</h5>
-                    <p><strong>交易性质：</strong>追涨主升浪，买在加速启动点，效率最高。</p>
-                    <p><strong>建仓策略：</strong>回抽确认不破中枢区间时介入。设置止损位于中枢下沿。</p>
-                    <p><strong>适用场景：</strong>捕捉主升浪或主跌浪的关键信号，理论上利润最丰厚的阶段。</p>
-                    <p><strong>注意事项：</strong>成本相对较高，需要严格止损。若跌回中枢区间需警惕。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>🔟 代码细分说明</h5>
-                    <p>本系统中将三买细分为A型和B型，这是代码实现的技术分类：</p>
-                    <ul>
-                      <li><strong>三买A</strong>：一买在中枢形成之后出现（先背驰买点，后形成中枢）</li>
-                      <li><strong>三买B</strong>：一买在中枢形成之前出现（先有中枢，后背驰买点）</li>
-                    </ul>
-                    <p class="detail-note">原著中只有第三类买点的统一定义，A/B分类是为了代码实现方便而进行的细分。</p>
-                  </div>
-                </div>
+            </div>
+            <div class="bs-compare-item">
+              <div class="bs-compare-type">第三类买点 (三买)</div>
+              <div class="bs-compare-desc">
+                上涨趋势中，回调不跌破中枢上沿形成的买点。分为三买A（第一次突破）和三买B（回踩确认），代表上涨趋势延续。
               </div>
-
-              <!-- 二卖详情 -->
-              <div class="chan-detail-item sell-item">
-                <div class="chan-detail-header">
-                  <span class="detail-title">💰 二卖 (第二类卖点) - 趋势的确认者</span>
-                  <span class="detail-toggle">展开 ▼</span>
-                </div>
-                <div class="chan-detail-content">
-                  <div class="detail-block">
-                    <h5>📖 核心定义</h5>
-                    <p>第二类卖点，与第二类买点对应：<strong>第一类卖点之后，第一次反弹不突破一卖高点形成的卖点</strong>。它本质上是对第一类卖点所提示的"趋势转折"进行的一次确认。</p>
-                    <p class="detail-note">一卖是上涨趋势终结时的最高点区域，二卖是对这个终结的确认。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>📍 具体位置</h5>
-                    <p>它的位置比较灵活，<strong>可以在中枢的上方、内部或下方</strong>：</p>
-                    <ul>
-                      <li><strong>在中枢上方出现</strong>：意味着反弹力度很弱，上涨趋势已终结</li>
-                      <li><strong>在中枢内部出现</strong>：力度中性，方向待定</li>
-                      <li><strong>在中枢下方出现</strong>：意味着反弹力度很弱，未来很可能继续下跌</li>
-                    </ul>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💎 特点</h5>
-                    <p><strong>确认点：</strong>是对上涨趋势结束的右侧确认，比一卖更安全。</p>
-                    <p><strong>获利了结：</strong>保护已有利润的关键位置，错过可能导致利润大幅回吐。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>💡 操作建议</h5>
-                    <p><strong>操作策略：</strong>获利了结，保护利润。建议分批减仓，反弹确认无力时清仓离场。</p>
-                    <p><strong>适用场景：</strong>上涨趋势末期，保护已有利润的关键位置。</p>
-                    <p><strong>注意事项：</strong>若反弹突破一卖高点，需警惕上涨趋势延续，可能形成更大级别上涨（类似二买跌破一买的情况）。</p>
-                  </div>
-                  <div class="detail-block">
-                    <h5>🔟 代码说明</h5>
-                    <p class="detail-note">当前系统仅支持二卖（2s）识别，一卖和三卖暂未实现。</p>
-                  </div>
-                </div>
-              </div>
-                  </div>
-                </div>
+            </div>
+            <div class="bs-compare-item">
+              <div class="bs-compare-type sell">第二类卖点 (二卖)</div>
+              <div class="bs-compare-desc">
+                第一类卖点之后，反弹不破前高形成的卖点。对应二买的反向操作，是上涨趋势转弱的重要信号。
               </div>
             </div>
           </div>
         </div>
+
+        <div class="theory-section">
+          <div class="theory-title">操作原则</div>
+          <div class="theory-content">
+            <div class="highlight-box">
+              <strong>买点买，卖点卖</strong><br>
+              严格按照买卖点信号操作，不预测、不主观判断。
+            </div>
+            <div class="highlight-box success">
+              <strong>级别递归</strong><br>
+              大级别决定方向，小级别寻找入场点，多级别联合作战。
+            </div>
+            <div class="highlight-box">
+              <strong>止损原则</strong><br>
+              买入后若跌破关键位置，应果断止损，保护本金安全。
+            </div>
+          </div>
+        </div>
+
+        <div class="theory-section">
+          <div class="theory-title">背驰判断</div>
+          <div class="theory-content">
+            <p>背驰是判断买卖点的核心技术，指价格创出新高/新低，但力度（MACD、成交量等）减弱的现象。</p>
+            <p><strong>区间套</strong>：通过小级别的背驰确认大级别的买卖点，提高判断准确性。</p>
+          </div>
+        </div>
       </div>
 
-      <!-- 系统设置 -->
-      <div id="settings" class="content-card hidden">
-        <h3><span>⚙️</span> 系统设置</h3>
-        <div class="content-divider"></div>
-        <div class="placeholder-content">
-          <div class="placeholder-icon">🚧</div>
-          <div class="placeholder-title">后续开发敬请期待</div>
-          <div class="placeholder-desc">功能正在开发中，敬请期待...</div>
+      <!-- 设置页面 -->
+      <div class="page" id="page-settings">
+        <div class="card">
+          <div class="card-title">分析设置</div>
+
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">多周期分析</div>
+              <div class="setting-desc">同时分析日线、周线等多个周期</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="multiPeriod" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">自动保存结果</div>
+              <div class="setting-desc">自动保存扫描结果到本地</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="autoSave" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">实时更新</div>
+              <div class="setting-desc">扫描过程中实时显示结果</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="realtimeUpdate" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">显示设置</div>
+
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">深色模式</div>
+              <div class="setting-desc">使用深色主题（当前固定）</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="darkMode" checked disabled>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">动画效果</div>
+              <div class="setting-desc">启用界面过渡动画</div>
+            </div>
+            <div class="setting-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="animations" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">关于</div>
+          <div class="theory-content">
+            <p><strong>ChanAnalyzer</strong> - 缠论技术分析工具</p>
+            <p style="color: var(--text-tertiary); font-size: 0.85rem;">版本: 1.0.0</p>
+            <p style="color: var(--text-tertiary); font-size: 0.85rem;">基于缠中说禅理论，辅助A股市场技术分析决策</p>
+          </div>
         </div>
       </div>
     </main>
   </div>
 
-  <!-- API配置 (必须在auth.js之前定义) -->
   <script>
-    window.API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    // ============================================
+    // API 配置
+    // ============================================
+    const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? `http://${window.location.hostname}:8000/api`
       : '/api';
-  </script>
 
-  <!-- 前端数据交互脚本 -->
-  <script src="/static/auth.js"></script>
-  <script src="/static/app.js"></script>
-  <script src="/static/individual.js"></script>
-  <script src="/static/scan.js"></script>
+    // ============================================
+    // 用户认证管理
+    // ============================================
+    const AuthManager = {
+      initialized: false,
+      initPromise: null,
 
-  <script>
-    (function() {
-      const menuButtons = document.querySelectorAll('.menu-item');
-      const contentSections = {
-        individual: document.getElementById('individual'),
-        'buy-scan': document.getElementById('buy-scan'),
-        'sell-scan': document.getElementById('sell-scan'),
-        sector: document.getElementById('sector'),
-        kline: document.getElementById('kline'),
-        chan: document.getElementById('chan'),
-        settings: document.getElementById('settings')
-      };
+      // 获取或创建用户token
+      async ensureUser() {
+        if (this.initPromise) {
+          return this.initPromise;
+        }
 
-      menuButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-          menuButtons.forEach(b => b.classList.remove('active'));
-          this.classList.add('active');
-
-          const targetId = this.getAttribute('data-target');
-          Object.values(contentSections).forEach(section => {
-            if (section) section.classList.add('hidden');
-          });
-          if (targetId && contentSections[targetId]) {
-            contentSections[targetId].classList.remove('hidden');
-
-            // 切换到个股分析页面时初始化
-            if (targetId === 'individual' && typeof initIndividualPage === 'function') {
-              initIndividualPage();
-            }
-
-            // 切换到买点扫描页面时初始化
-            if (targetId === 'buy-scan' && typeof initBuyScanPage === 'function') {
-              initBuyScanPage();
-            }
-
-            // 切换到卖点扫描页面时初始化
-            if (targetId === 'sell-scan' && typeof initSellScanPage === 'function') {
-              initSellScanPage();
+        this.initPromise = (async () => {
+          let token = localStorage.getItem('chanalyzer_token');
+          if (!token) {
+            // 创建新用户
+            const response = await fetch(`${API_BASE}/auth/session`);
+            if (response.ok) {
+              const data = await response.json();
+              token = data.token;
+              localStorage.setItem('chanalyzer_token', token);
             }
           }
-        });
-      });
+          this.initialized = true;
+          return token;
+        })();
 
-      // 确保初始状态正确
-      const activeMenu = document.querySelector('.menu-item.active');
-      if (activeMenu) {
-        const defaultTarget = activeMenu.getAttribute('data-target');
-        Object.values(contentSections).forEach(section => section.classList.add('hidden'));
-        if (defaultTarget && contentSections[defaultTarget]) {
-          contentSections[defaultTarget].classList.remove('hidden');
+        return this.initPromise;
+      },
+
+      // 获取认证头
+      getAuthHeaders() {
+        const token = localStorage.getItem('chanalyzer_token');
+        return token ? { 'Authorization': `Bearer ${token}` } : {};
+      },
+
+      // 封装fetch请求，自动添加认证头
+      async fetch(url, options = {}) {
+        const headers = {
+          ...options.headers,
+          ...this.getAuthHeaders()
+        };
+        return fetch(url, { ...options, headers });
+      }
+    };
+
+    // 页面加载时初始化用户
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        await AuthManager.ensureUser();
+      } catch (error) {
+        console.error('用户初始化失败:', error);
+      }
+
+      // 加载历史数据（如果有）
+      loadBuyScanHistory();
+    });
+
+    // ============================================
+    // 导航切换
+    // ============================================
+    const navTabs = document.querySelectorAll('.nav-tab');
+    const pages = document.querySelectorAll('.page');
+
+    navTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetPage = tab.dataset.page;
+
+        // 更新标签状态
+        navTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // 切换页面
+        pages.forEach(page => {
+          page.classList.remove('active');
+          if (page.id === `page-${targetPage}`) {
+            page.classList.add('active');
+          }
+        });
+
+        // 页面切换时加载数据
+        if (targetPage === 'buy-scan') {
+          loadBuyScanHistory();
+        } else if (targetPage === 'sell-scan') {
+          loadSellScanHistory();
+        }
+      });
+    });
+
+    // ============================================
+    // 温度滑块
+    // ============================================
+    const tempSliders = [
+      { slider: 'tempSliderA', value: 'tempValueA' },
+      { slider: 'tempSliderB', value: 'tempValueB' },
+      { slider: 'tempSliderD', value: 'tempValueD' }
+    ];
+
+    tempSliders.forEach(({ slider, value }) => {
+      const sliderEl = document.getElementById(slider);
+      const valueEl = document.getElementById(value);
+
+      if (sliderEl && valueEl) {
+        sliderEl.addEventListener('input', (e) => {
+          valueEl.textContent = e.target.value;
+        });
+      }
+    });
+
+    // ============================================
+    // Checkbox 选择状态
+    // ============================================
+    function setupCheckbox(item) {
+      const checkbox = item.querySelector('input');
+      if (!checkbox) return;
+
+      // 更新选中状态的样式
+      function updateSelected() {
+        if (checkbox.checked) {
+          item.classList.add('selected');
+        } else {
+          item.classList.remove('selected');
         }
       }
-    })();
 
-    // 缠论说明页面 - 手风琴展开/收起功能
-    (function() {
-      const detailHeaders = document.querySelectorAll('.chan-detail-header');
+      // 点击容器时的处理
+      item.addEventListener('click', function(e) {
+        // 阻止 label 的默认行为（避免双重点击）
+        e.preventDefault();
 
-      detailHeaders.forEach(header => {
-        header.addEventListener('click', function() {
-          const content = this.nextElementSibling;
-          const toggle = this.querySelector('.detail-toggle');
+        // 切换 checkbox 状态
+        checkbox.checked = !checkbox.checked;
+        updateSelected();
+      });
 
-          // 切换展开状态
-          content.classList.toggle('expanded');
-          toggle.classList.toggle('expanded');
+      // 初始化状态
+      updateSelected();
+    }
 
-          if (content.classList.contains('expanded')) {
-            toggle.textContent = '收起 ▲';
-          } else {
-            toggle.textContent = '展开 ▼';
+    document.querySelectorAll('.checkbox-item').forEach(setupCheckbox);
+
+    // ============================================
+    // 个股分析功能 (SSE 流式)
+    // ============================================
+    let currentEventSource = null;
+
+    document.getElementById('analyzeBtn')?.addEventListener('click', async () => {
+      const stockCode = document.getElementById('stockCode').value.trim();
+      if (!stockCode) {
+        alert('请输入股票代码');
+        return;
+      }
+
+      // 确保用户已初始化
+      await AuthManager.ensureUser();
+
+      // 停止之前的请求
+      if (currentEventSource) {
+        currentEventSource.close();
+      }
+
+      const btn = document.getElementById('analyzeBtn');
+      btn.disabled = true;
+      btn.textContent = '分析中...';
+
+      // 显示分析提示
+      document.getElementById('analyzeTip').style.display = 'flex';
+
+      // 重置输出区域
+      document.getElementById('analystAOutput').innerHTML = '<div class="loading">分析中...</div>';
+      document.getElementById('analystBOutput').innerHTML = '<div class="loading">分析中...</div>';
+      document.getElementById('decisionOutput').innerHTML = '<div class="loading">等待分析师完成...</div>';
+      document.getElementById('analystAStatus').className = 'analyst-status analyzing';
+      document.getElementById('analystBStatus').className = 'analyst-status analyzing';
+      document.getElementById('analystAStatus').textContent = '分析中';
+      document.getElementById('analystBStatus').textContent = '分析中';
+
+      // 获取温度配置
+      const tempA = parseFloat(document.getElementById('tempSliderA').value);
+      const tempB = parseFloat(document.getElementById('tempSliderB').value);
+      const tempD = parseFloat(document.getElementById('tempSliderD').value);
+
+      // 构建 SSE 连接
+      const url = `${API_BASE}/stock/analyze`;
+      const requestBody = {
+        code: stockCode,
+        multi: true,
+        temperatures: {
+          analyst_a: tempA,
+          analyst_b: tempB,
+          decision_maker: tempD
+        }
+      };
+
+      try {
+        const headers = { 'Content-Type': 'application/json', ...AuthManager.getAuthHeaders() };
+        const response = await fetch(`${API_BASE}/stock/analyze`, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          throw new Error('分析请求失败');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                handleSSEEvent(data);
+              } catch (e) {
+                console.error('解析 SSE 数据失败:', e);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('分析失败:', error);
+        document.getElementById('analystAOutput').textContent = `分析失败: ${error.message}`;
+        document.getElementById('analystBOutput').textContent = `分析失败: ${error.message}`;
+        document.getElementById('decisionOutput').textContent = '分析失败，请重试';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '开始分析';
+        document.getElementById('analystAStatus').textContent = '';
+        document.getElementById('analystBStatus').textContent = '';
+        // 隐藏分析提示
+        document.getElementById('analyzeTip').style.display = 'none';
+      }
+    });
+
+    // 文本高亮处理函数
+    function highlightText(element) {
+      let html = element.innerHTML;
+
+      // 价格数字高亮（匹配小数格式）
+      html = html.replace(/(\d+\.\d{2})/g, '<span class="num-highlight">$1</span>');
+
+      // 买点关键词高亮
+      html = html.replace(/(一买|二买|三买|买点)/g, '<span class="keyword-buy">$1</span>');
+
+      // 卖点关键词高亮
+      html = html.replace(/(一卖|二卖|三卖|卖点)/g, '<span class="keyword-sell">$1</span>');
+
+      // 建议类文字高亮
+      html = html.replace(/(建议买入|推荐买入|可以考虑买入)/g, '<span class="recommendation recommend-buy">$1</span>');
+      html = html.replace(/(建议卖出|推荐卖出|可以考虑卖出)/g, '<span class="recommendation recommend-sell">$1</span>');
+      html = html.replace(/(持有|观望|等待|谨慎)/g, '<span class="recommendation recommend-hold">$1</span>');
+
+      element.innerHTML = html;
+    }
+
+    // 打字机效果函数
+    function typeWriter(element, text, speed = 20) {
+      element.textContent = '';
+
+      // 检查页面是否可见，如果不可见则直接输出并应用高亮
+      if (document.hidden) {
+        element.textContent = text;
+        highlightText(element);
+        return null;
+      }
+
+      let index = 0;
+      let timer = setInterval(() => {
+        // 如果页面变为不可见，立即输出全部内容并停止定时器
+        if (document.hidden) {
+          clearInterval(timer);
+          element.textContent = text;
+          highlightText(element);
+          return;
+        }
+
+        if (index < text.length) {
+          element.textContent += text.charAt(index);
+          index++;
+        } else {
+          clearInterval(timer);
+          // 打字完成后应用高亮
+          highlightText(element);
+        }
+      }, speed);
+
+      return timer;
+    }
+
+    // 存储打字机定时器，用于中断
+    const typeWriterTimers = {
+      analystA: null,
+      analystB: null,
+      decision: null
+    };
+
+    // 监听页面可见性变化，当页面变为可见时继续打字机效果
+    let pendingText = {
+      analystA: null,
+      analystB: null,
+      decision: null
+    };
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // 页面隐藏时，保存待输出的文本
+        if (typeWriterTimers.analystA) {
+          clearInterval(typeWriterTimers.analystA);
+          pendingText.analystA = document.getElementById('analystAOutput')?.textContent || '';
+        }
+        if (typeWriterTimers.analystB) {
+          clearInterval(typeWriterTimers.analystB);
+          pendingText.analystB = document.getElementById('analystBOutput')?.textContent || '';
+        }
+        if (typeWriterTimers.decision) {
+          clearInterval(typeWriterTimers.decision);
+          pendingText.decision = document.getElementById('decisionOutput')?.textContent || '';
+        }
+      }
+    });
+
+    function handleSSEEvent(data) {
+      switch (data.event) {
+        case 'analyst_start':
+          // 分析师开始分析
+          break;
+
+        case 'analyst_done':
+          const analystId = data.analyst_id;
+          const opinion = data.opinion;
+          const outputEl = analystId === 0
+            ? document.getElementById('analystAOutput')
+            : document.getElementById('analystBOutput');
+          const statusEl = analystId === 0
+            ? document.getElementById('analystAStatus')
+            : document.getElementById('analystBStatus');
+          const timerKey = analystId === 0 ? 'analystA' : 'analystB';
+
+          // 清除之前的打字机定时器
+          if (typeWriterTimers[timerKey]) {
+            clearInterval(typeWriterTimers[timerKey]);
+          }
+
+          if (outputEl) {
+            // 使用打字机效果
+            outputEl.innerHTML = '';
+            typeWriterTimers[timerKey] = typeWriter(outputEl, opinion, 15);
+          }
+          if (statusEl) {
+            statusEl.className = 'analyst-status';
+            statusEl.textContent = '完成';
+          }
+          break;
+
+        case 'decision_start':
+          document.getElementById('decisionOutput').innerHTML = '<div class="loading">综合决策中...</div>';
+          break;
+
+        case 'decision_done':
+          // 清除之前的打字机定时器
+          if (typeWriterTimers.decision) {
+            clearInterval(typeWriterTimers.decision);
+          }
+
+          const decisionOutput = document.getElementById('decisionOutput');
+          if (decisionOutput && data.decision) {
+            decisionOutput.innerHTML = '';
+            typeWriterTimers.decision = typeWriter(decisionOutput, data.decision, 15);
+          }
+          break;
+
+        case 'complete':
+          // 完成事件（不包含数据，只是状态标记）
+          break;
+
+        case 'error':
+          console.error('分析错误:', data.message);
+          const errorOutput = document.getElementById('decisionOutput');
+          if (errorOutput) {
+            errorOutput.textContent = `错误: ${data.message}`;
+          }
+          break;
+      }
+    }
+
+    // ============================================
+    // 扫描功能
+    // ============================================
+    const scanState = {
+      buy: { scanning: false, pollInterval: null },
+      sell: { scanning: false, pollInterval: null }
+    };
+
+    // 买点类型标签
+    const BS_TYPE_LABELS = {
+      '1': '一买',
+      '1p': '一买衍生',
+      '2': '二买',
+      '3a': '三买A',
+      '3b': '三买B',
+      '2s': '二卖'
+    };
+
+    // 启动买点扫描
+    document.getElementById('buyScanBtn')?.addEventListener('click', async () => {
+      if (scanState.buy.scanning) return;
+
+      // 确保用户已初始化
+      await AuthManager.ensureUser();
+
+      // 获取选中的买点类型
+      const checkboxes = document.querySelectorAll('#buyTypesGroup input:checked');
+      const types = Array.from(checkboxes).map(cb => cb.value);
+
+      if (types.length === 0) {
+        alert('请至少选择一种买点类型');
+        return;
+      }
+
+      const limit = parseInt(document.getElementById('buyLimit').value);
+
+      // 更新UI状态
+      scanState.buy.scanning = true;
+      const btn = document.getElementById('buyScanBtn');
+      btn.disabled = true;
+      btn.innerHTML = '⏳ 扫描中...';
+
+      document.getElementById('buyProgressCard').style.display = 'block';
+      document.getElementById('buyStats').style.display = 'flex';
+      document.getElementById('buyEmpty').style.display = 'none';
+      document.getElementById('buyResults').innerHTML = '';
+
+      // 更新进度显示
+      document.getElementById('buyProgressStatus').textContent = '启动扫描任务...';
+      document.getElementById('buyProgressDetail').textContent = '0';
+
+      try {
+        const response = await AuthManager.fetch(`${API_BASE}/scan/buy/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ types, limit })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.detail || result.message || '启动扫描失败');
+        }
+
+        // 检查返回状态
+        if (result.status === 'running') {
+          alert(result.message || '已有扫描任务正在进行中');
+          resetBuyScanUI();
+          return;
+        }
+        if (result.status === 'busy') {
+          alert(result.message || '系统繁忙，请稍后再试');
+          resetBuyScanUI();
+          return;
+        }
+
+        // 开始轮询
+        pollBuyScanStatus();
+      } catch (error) {
+        console.error('启动买点扫描失败:', error);
+        alert(`启动扫描失败: ${error.message}`);
+        resetBuyScanUI();
+      }
+    });
+
+    // 启动卖点扫描
+    document.getElementById('sellScanBtn')?.addEventListener('click', async () => {
+      if (scanState.sell.scanning) return;
+
+      // 确保用户已初始化
+      await AuthManager.ensureUser();
+
+      // 获取选中的卖点类型
+      const checkboxes = document.querySelectorAll('#sellTypesGroup input:checked');
+      const types = Array.from(checkboxes).map(cb => cb.value);
+
+      if (types.length === 0) {
+        alert('请至少选择一种卖点类型');
+        return;
+      }
+
+      const limit = parseInt(document.getElementById('sellLimit').value);
+
+      // 更新UI状态
+      scanState.sell.scanning = true;
+      const btn = document.getElementById('sellScanBtn');
+      btn.disabled = true;
+      btn.innerHTML = '⏳ 扫描中...';
+
+      document.getElementById('sellProgressCard').style.display = 'block';
+      document.getElementById('sellStats').style.display = 'flex';
+      document.getElementById('sellEmpty').style.display = 'none';
+      document.getElementById('sellResults').innerHTML = '';
+
+      // 更新进度显示
+      document.getElementById('sellProgressStatus').textContent = '启动扫描任务...';
+      document.getElementById('sellProgressDetail').textContent = '0';
+
+      try {
+        const response = await AuthManager.fetch(`${API_BASE}/scan/sell/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ types, limit })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.detail || result.message || '启动扫描失败');
+        }
+
+        // 检查返回状态
+        if (result.status === 'running') {
+          alert(result.message || '已有扫描任务正在进行中');
+          resetSellScanUI();
+          return;
+        }
+        if (result.status === 'busy') {
+          alert(result.message || '系统繁忙，请稍后再试');
+          resetSellScanUI();
+          return;
+        }
+
+        // 开始轮询
+        pollSellScanStatus();
+      } catch (error) {
+        console.error('启动卖点扫描失败:', error);
+        alert(`启动扫描失败: ${error.message}`);
+        resetSellScanUI();
+      }
+    });
+
+    // 轮询买点扫描状态
+    async function pollBuyScanStatus() {
+      if (scanState.buy.pollInterval) return;
+
+      scanState.buy.pollInterval = setInterval(async () => {
+        try {
+          const response = await AuthManager.fetch(`${API_BASE}/scan/buy/status`);
+          if (!response.ok) {
+            console.error('获取买点状态失败:', response.status);
+            return;
+          }
+
+          const status = await response.json();
+          updateBuyScanProgress(status);
+
+          if (status.error) {
+            clearInterval(scanState.buy.pollInterval);
+            scanState.buy.pollInterval = null;
+            alert(`扫描失败: ${status.error}`);
+            resetBuyScanUI();
+            return;
+          }
+
+          if (!status.scanning) {
+            clearInterval(scanState.buy.pollInterval);
+            scanState.buy.pollInterval = null;
+            await loadBuyScanResults();
+            resetBuyScanUI();
+          }
+        } catch (error) {
+          console.error('获取买点状态失败:', error);
+        }
+      }, 1000);
+    }
+
+    // 轮询卖点扫描状态
+    async function pollSellScanStatus() {
+      if (scanState.sell.pollInterval) return;
+
+      scanState.sell.pollInterval = setInterval(async () => {
+        try {
+          const response = await AuthManager.fetch(`${API_BASE}/scan/sell/status`);
+          if (!response.ok) {
+            console.error('获取卖点状态失败:', response.status);
+            return;
+          }
+
+          const status = await response.json();
+          updateSellScanProgress(status);
+
+          if (status.error) {
+            clearInterval(scanState.sell.pollInterval);
+            scanState.sell.pollInterval = null;
+            alert(`扫描失败: ${status.error}`);
+            resetSellScanUI();
+            return;
+          }
+
+          if (!status.scanning) {
+            clearInterval(scanState.sell.pollInterval);
+            scanState.sell.pollInterval = null;
+            await loadSellScanResults();
+            resetSellScanUI();
+          }
+        } catch (error) {
+          console.error('获取卖点状态失败:', error);
+        }
+      }, 1000);
+    }
+
+    // 更新买点扫描进度
+    function updateBuyScanProgress(status) {
+      const progressFill = document.getElementById('buyProgressFill');
+      const progressStatus = document.getElementById('buyProgressStatus');
+      const progressDetail = document.getElementById('buyProgressDetail');
+
+      if (status.total > 0) {
+        const percent = Math.min(100, (status.progress / status.total * 100));
+        progressFill.style.width = `${percent}%`;
+        progressStatus.textContent = `扫描中 ${status.progress}/${status.total}`;
+      } else {
+        progressStatus.textContent = status.message || '准备中...';
+      }
+      progressDetail.textContent = `已找到 ${status.found} 只`;
+    }
+
+    // 更新卖点扫描进度
+    function updateSellScanProgress(status) {
+      const progressFill = document.getElementById('sellProgressFill');
+      const progressStatus = document.getElementById('sellProgressStatus');
+      const progressDetail = document.getElementById('sellProgressDetail');
+
+      if (status.total > 0) {
+        const percent = Math.min(100, (status.progress / status.total * 100));
+        progressFill.style.width = `${percent}%`;
+        progressStatus.textContent = `扫描中 ${status.progress}/${status.total}`;
+      } else {
+        progressStatus.textContent = status.message || '准备中...';
+      }
+      progressDetail.textContent = `已找到 ${status.found} 只`;
+    }
+
+    // 加载买点扫描结果
+    async function loadBuyScanResults() {
+      try {
+        const response = await AuthManager.fetch(`${API_BASE}/scan/buy/results`);
+        if (!response.ok) {
+          console.error('获取买点结果失败:', response.status);
+          return;
+        }
+
+        const data = await response.json();
+        const stocks = data.stocks || [];
+
+        renderStockResults('buy', stocks);
+        updateBuyScanStats(stocks);
+      } catch (error) {
+        console.error('获取买点结果失败:', error);
+      }
+    }
+
+    // 加载卖点扫描结果
+    async function loadSellScanResults() {
+      try {
+        const response = await AuthManager.fetch(`${API_BASE}/scan/sell/results`);
+        if (!response.ok) {
+          console.error('获取卖点结果失败:', response.status);
+          return;
+        }
+
+        const data = await response.json();
+        const stocks = data.stocks || [];
+
+        renderStockResults('sell', stocks);
+        updateSellScanStats(stocks);
+      } catch (error) {
+        console.error('获取卖点结果失败:', error);
+      }
+    }
+
+    // 渲染股票结果列表
+    function renderStockResults(direction, stocks) {
+      const resultsContainer = document.getElementById(`${direction}Results`);
+      const emptyState = document.getElementById(`${direction}Empty`);
+
+      if (!stocks || stocks.length === 0) {
+        resultsContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+
+      // 按最新信号日期排序
+      const sortedStocks = [...stocks].sort((a, b) => {
+        if (!a.latest_signal?.date || !b.latest_signal?.date) return 0;
+        return new Date(b.latest_signal.date) - new Date(a.latest_signal.date);
+      });
+
+      resultsContainer.innerHTML = sortedStocks.map(stock => {
+        const signal = stock.latest_signal;
+        const isSell = direction === 'sell';
+
+        // 获取主要买卖点类型
+        let typeLabel = '--';
+        if (signal && signal.type) {
+          typeLabel = BS_TYPE_LABELS[signal.type] || signal.type;
+        } else if (stock.signals && stock.signals.length > 0) {
+          // 如果没有 latest_signal，使用第一个信号
+          typeLabel = BS_TYPE_LABELS[stock.signals[0].type] || stock.signals[0].type;
+        }
+
+        const signalDate = signal?.date || (stock.signals?.[0]?.date) || '--';
+        const signalPrice = signal?.price || (stock.signals?.[0]?.price) || 0;
+
+        return `
+          <div class="stock-card">
+            <div class="stock-header">
+              <span class="stock-code">${stock.code}</span>
+              <span class="stock-name">${stock.name || ''}</span>
+            </div>
+            <div class="stock-row">
+              <span class="stock-label">当前价格</span>
+              <span class="stock-value">${stock.current_price ? stock.current_price.toFixed(2) : '--'}</span>
+            </div>
+            <div class="stock-row">
+              <span class="stock-label">${isSell ? '卖点' : '买点'}类型</span>
+              <span class="stock-signal ${isSell ? 'sell' : ''}">${typeLabel}</span>
+            </div>
+            <div class="stock-row">
+              <span class="stock-label">信号日期</span>
+              <span class="stock-value">${signalDate}</span>
+            </div>
+            <div class="stock-row">
+              <span class="stock-label">信号价格</span>
+              <span class="stock-value">${signalPrice ? signalPrice.toFixed(2) : '--'}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 更新买点统计
+    function updateBuyScanStats(stocks) {
+      const stats = { '1': 0, '1p': 0, '2': 0, '3a': 0, '3b': 0 };
+
+      stocks.forEach(stock => {
+        stock.signals?.forEach(signal => {
+          if (signal.type in stats) {
+            stats[signal.type]++;
           }
         });
       });
-    })();
+
+      document.getElementById('buyTotal').textContent = stocks.length;
+      document.getElementById('buy1Count').textContent = stats['1'];
+      document.getElementById('buy1pCount').textContent = stats['1p'];
+      document.getElementById('buy2Count').textContent = stats['2'];
+      document.getElementById('buy3aCount').textContent = stats['3a'];
+      document.getElementById('buy3bCount').textContent = stats['3b'];
+    }
+
+    // 更新卖点统计
+    function updateSellScanStats(stocks) {
+      let count2s = 0;
+
+      stocks.forEach(stock => {
+        stock.signals?.forEach(signal => {
+          if (signal.type === '2s') count2s++;
+        });
+      });
+
+      document.getElementById('sellTotal').textContent = stocks.length;
+      document.getElementById('sell2sCount').textContent = count2s;
+    }
+
+    // 重置买点扫描UI
+    function resetBuyScanUI() {
+      scanState.buy.scanning = false;
+      const btn = document.getElementById('buyScanBtn');
+      btn.disabled = false;
+      btn.innerHTML = '🔍 开始扫描';
+    }
+
+    // 重置卖点扫描UI
+    function resetSellScanUI() {
+      scanState.sell.scanning = false;
+      const btn = document.getElementById('sellScanBtn');
+      btn.disabled = false;
+      btn.innerHTML = '🔍 开始扫描';
+    }
+
+    // 加载历史数据
+    async function loadBuyScanHistory() {
+      try {
+        const response = await fetch(`${API_BASE}/scan/buy/results`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.stocks && data.stocks.length > 0) {
+            renderStockResults('buy', data.stocks);
+            updateBuyScanStats(data.stocks);
+            document.getElementById('buyEmpty').style.display = 'none';
+            document.getElementById('buyStats').style.display = 'flex';
+          }
+        }
+      } catch (error) {
+        console.error('加载历史数据失败:', error);
+      }
+    }
+
+    async function loadSellScanHistory() {
+      try {
+        const response = await fetch(`${API_BASE}/scan/sell/results`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.stocks && data.stocks.length > 0) {
+            renderStockResults('sell', data.stocks);
+            updateSellScanStats(data.stocks);
+            document.getElementById('sellEmpty').style.display = 'none';
+            document.getElementById('sellStats').style.display = 'flex';
+          }
+        }
+      } catch (error) {
+        console.error('加载历史数据失败:', error);
+      }
+    }
+
+    // ============================================
+    // ============================================
+    // 页面初始化时加载历史数据
+    // ============================================
+    // 历史数据加载已在 AuthManager 初始化中处理
   </script>
 </body>
 </html>
