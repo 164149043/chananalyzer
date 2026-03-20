@@ -23,6 +23,47 @@ import sys
 from datetime import datetime, timedelta
 from typing import List
 
+# ==================== 修复 tushare 权限问题 ====================
+# 强制使用 /tmp 目录存储 token，避免云服务器权限问题
+os.environ['TUSHARE_PATH'] = '/tmp'
+
+# Monkey patch tushare，在导入时立即生效
+import pandas as pd
+import tushare as ts
+
+# 保存原始函数
+_original_set_token = ts.set_token
+_original_pro_api = ts.pro_api
+
+def _patched_set_token(token):
+    """修复后的 set_token，使用 /tmp 目录"""
+    fp = '/tmp/tk.csv'
+    # 先删除旧文件避免权限冲突
+    if os.path.exists(fp):
+        try:
+            os.remove(fp)
+        except:
+            pass
+    df = pd.DataFrame({'token': [token]})
+    df.to_csv(fp, index=False)
+    ts._Tushare__token = token
+
+def _patched_pro_api(token=None):
+    """修复后的 pro_api，从 /tmp 读取 token"""
+    if token:
+        return _original_pro_api(token=token)
+    fp = '/tmp/tk.csv'
+    if os.path.exists(fp):
+        df = pd.read_csv(fp)
+        token = df['token'][0]
+        return _original_pro_api(token=token)
+    return _original_pro_api()
+
+# 应用 patch
+ts.set_token = _patched_set_token
+ts.pro_api = _patched_pro_api
+# ==================== 修复结束 ====================
+
 try:
     from tqdm import tqdm
     HAS_TQDM = True
