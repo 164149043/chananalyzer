@@ -18,6 +18,40 @@ import time
 from datetime import datetime, timedelta
 from typing import List
 
+# ==================== 修复 tushare 权限问题 ====================
+os.environ['TUSHARE_PATH'] = '/tmp'
+
+import pandas as pd
+import tushare as ts
+
+_original_set_token = ts.set_token
+_original_pro_api = ts.pro_api
+
+def _patched_set_token(token):
+    fp = '/tmp/tk.csv'
+    if os.path.exists(fp):
+        try:
+            os.remove(fp)
+        except:
+            pass
+    df = pd.DataFrame({'token': [token]})
+    df.to_csv(fp, index=False)
+    ts._Tushare__token = token
+
+def _patched_pro_api(token=None):
+    if token:
+        return _original_pro_api(token=token)
+    fp = '/tmp/tk.csv'
+    if os.path.exists(fp):
+        df = pd.read_csv(fp)
+        token = df['token'][0]
+        return _original_pro_api(token=token)
+    return _original_pro_api()
+
+ts.set_token = _patched_set_token
+ts.pro_api = _patched_pro_api
+# ==================== 修复结束 ====================
+
 try:
     from tqdm import tqdm
     HAS_TQDM = True
