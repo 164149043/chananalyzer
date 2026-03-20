@@ -28,6 +28,12 @@ def _patched_set_token(token):
     """修复后的 set_token 函数，使用 /tmp 目录"""
     import pandas as pd
     fp = '/tmp/tk.csv'
+    # 先删除旧文件避免权限冲突
+    if os.path.exists(fp):
+        try:
+            os.remove(fp)
+        except:
+            pass
     df = pd.DataFrame({'token': [token]})
     df.to_csv(fp, index=False)
     ts._Tushare__token = token
