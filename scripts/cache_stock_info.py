@@ -90,8 +90,8 @@ def fetch_stock_info_from_tushare():
             print("未获取到数据")
             return []
 
-        # 只保留沪深股票
-        df = df[(df['ts_code'].str.endswith('.SZ')) | (df['ts_code'].str.endswith('.SH'))]
+        # 保留沪深北交易所股票
+        df = df[(df['ts_code'].str.endswith('.SZ')) | (df['ts_code'].str.endswith('.SH')) | (df['ts_code'].str.endswith('.BJ'))]
 
         result = []
         for _, row in df.iterrows():
