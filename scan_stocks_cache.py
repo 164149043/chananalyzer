@@ -227,8 +227,8 @@ def get_stock_money_flow(code: str, days: int = 5) -> Dict[str, Any]:
 
     try:
         import tushare as ts
-        ts.set_token(token)
-        pro = ts.pro_api()
+        # 直接传入token，避免写入缓存文件导致权限问题
+        pro = ts.pro_api(token)
 
         # 转换代码格式
         if code.startswith('6'):
@@ -315,8 +315,8 @@ def exclude_st_stocks(stock_codes: List[str]) -> List[str]:
 
     try:
         import tushare as ts
-        ts.set_token(token)
-        pro = ts.pro_api()
+        # 直接传入token，避免写入缓存文件导致权限问题
+        pro = ts.pro_api(token)
 
         # 转换代码格式
         ts_codes = []
