@@ -22,41 +22,26 @@ import tushare as ts
 # 修复权限问题：Monkey patch tushare，强制使用 /tmp/tk.csv
 # tushare 原始代码会写入 ~/tk.csv，在云环境中可能没有权限
 
-# Patch 1: set_token - 写入 /tmp/tk.csv
+# Patch 1: set_token - 直接设置 token，避免写入文件
 _original_set_token = ts.set_token
 def _patched_set_token(token):
-    """修复后的 set_token 函数，使用 /tmp 目录"""
-    import pandas as pd
-    fp = '/tmp/tk.csv'
-    # 先删除旧文件避免权限冲突
-    if os.path.exists(fp):
-        try:
-            os.remove(fp)
-        except:
-            pass
-    df = pd.DataFrame({'token': [token]})
-    df.to_csv(fp, index=False)
+    """修复后的 set_token 函数，直接设置 token 不写入文件"""
+    # 直接设置内部 token，不写入文件避免权限问题
     ts._Tushare__token = token
 ts.set_token = _patched_set_token
 
-# Patch 2: pro_api - 从 /tmp/tk.csv 读取 token
+# Patch 2: pro_api - 优先使用传入 token 或内部 token
 _original_pro_api = ts.pro_api
 def _patched_pro_api(token=None):
-    """修复后的 pro_api 函数，从 /tmp 读取 token"""
-    import pandas as pd
-    import os
+    """修复后的 pro_api 函数，优先使用传入 token 或内部 token"""
     # 如果传入了 token，直接使用
     if token:
         return _original_pro_api(token=token)
-    # 否则尝试从 /tmp/tk.csv 读取
-    fp = '/tmp/tk.csv'
-    if os.path.exists(fp):
-        df = pd.read_csv(fp)
-        token = df['token'][0]
-        return _original_pro_api(token=token)
-    else:
-        # 回退到原始行为（会抛出异常）
-        return _original_pro_api()
+    # 否则使用已设置的内部 token
+    if hasattr(ts, '_Tushare__token') and ts._Tushare__token:
+        return _original_pro_api(token=ts._Tushare__token)
+    # 回退到原始行为（会抛出异常）
+    return _original_pro_api()
 ts.pro_api = _patched_pro_api
 
 from Common.CEnum import AUTYPE, DATA_FIELD, KL_TYPE

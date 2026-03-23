@@ -12,9 +12,6 @@ ChanAnalyzer FastAPI 后端服务 - 真实数据版
 import os
 import sys
 
-# 修复 tushare 权限问题：强制使用 /tmp 目录存储 token
-# 必须在任何 tushare 导入之前设置
-os.environ['TUSHARE_PATH'] = '/tmp'
 import json
 import asyncio
 import importlib
@@ -77,6 +74,14 @@ def import_multi_ai_analyzer():
 def import_sector_flow():
     """导入 sector_flow 模块（绕过 ChanAnalyzer/__init__.py）"""
     return importlib.import_module('ChanAnalyzer.sector_flow')
+
+
+def import_chan_for_cache():
+    """导入 CChan 相关模块用于本地数据库分析（绕过 ChanAnalyzer/__init__.py）"""
+    from Chan import CChan
+    from ChanConfig import CChanConfig
+    from Common.CEnum import DATA_SRC, KL_TYPE, AUTYPE
+    return CChan, DATA_SRC, KL_TYPE, AUTYPE
 
 
 # 导入扫描模块（复用已有逻辑）
@@ -505,14 +510,10 @@ def _run_scan_in_process(stock_codes: List[str], buy_types: List[str],
     Returns:
         扫描结果字典
     """
-    import os
     import sys
     from pathlib import Path
     import json
     from datetime import datetime
-
-    # 修复 tushare 权限问题：子进程中必须重新设置
-    os.environ['TUSHARE_PATH'] = '/tmp'
 
     # 添加项目路径
     user_data_path = Path(user_data_dir)
@@ -1316,32 +1317,64 @@ async def get_areas():
 
 @app.get("/api/stock/{code}/signals")
 async def get_stock_signals(code: str):
-    """获取指定股票的买卖点摘要（用于快速分析）"""
+    """获取指定股票的买卖点摘要（用于快速分析，使用本地数据库）"""
     try:
-        ChanAnalyzer = import_chan_analyzer()
-        analyzer = ChanAnalyzer(code=code)
-        analysis = analyzer.get_analysis()
+        # 使用本地数据库进行分析
+        CChan, DATA_SRC, KL_TYPE, AUTYPE = import_chan_for_cache()
 
-        # 提取最新买/卖点
+        # 创建 CChan 实例，使用本地数据库
+        chan = CChan(
+            code=code,
+            begin_time="2023-01-01",  # 从 chan.db 读取数据
+            end_time=datetime.now().strftime("%Y-%m-%d"),
+            data_src=DATA_SRC.CACHE_DB,  # 使用本地数据库
+            lv_list=[KL_TYPE.K_DAY],
+            autype=AUTYPE.QFQ,
+        )
+
+        # 获取买卖点
+        bsp_list = chan.get_latest_bsp(number=0)
+
         latest_buy = None
         latest_sell = None
 
-        for signal in analysis.get('buy_signals', []):
-            if not latest_buy or signal['date'] > latest_buy['date']:
-                latest_buy = signal
+        for bsp in bsp_list:
+            signal = {
+                "type": bsp.type2str(),
+                "date": str(bsp.klu.time),
+                "price": bsp.klu.close
+            }
+            if bsp.is_buy:
+                if not latest_buy or signal['date'] > latest_buy.get('date', ''):
+                    latest_buy = signal
+            else:
+                if not latest_sell or signal['date'] > latest_sell.get('date', ''):
+                    latest_sell = signal
 
-        for signal in analysis.get('sell_signals', []):
-            if not latest_sell or signal['date'] > latest_sell['date']:
-                latest_sell = signal
+        # 获取最新价格
+        current_price = 0
+        if chan[0].lst:
+            last_klu = chan[0].lst[-1].lst[-1]
+            current_price = last_klu.close
 
         return {
             "code": code,
-            "current_price": analysis.get('current_price', 0),
+            "current_price": current_price,
             "latest_buy": latest_buy,
             "latest_sell": latest_sell
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"[get_stock_signals] {code} 分析失败: {error_detail}")
+        # 返回空数据而不是抛出错误
+        return {
+            "code": code,
+            "current_price": 0,
+            "latest_buy": None,
+            "latest_sell": None,
+            "error": str(e)
+        }
 
 
 @app.get("/api/ranking")
