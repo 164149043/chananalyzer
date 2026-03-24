@@ -385,9 +385,8 @@ async def background_scan_task(limit: int = 100, buy_types: List[str] = None):
                     info = pool.get_stock_info(code)
 
                     # 获取最新价格
-                    current_price = 0
-                    if not analysis.get('multi'):
-                        current_price = analysis.get('current_price', 0)
+                    # 多周期分析时，analyzer 会使用日线级别的 current_price
+                    current_price = analysis.get('current_price', 0)
 
                     results.append({
                         'code': code,
