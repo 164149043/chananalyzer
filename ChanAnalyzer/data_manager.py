@@ -167,22 +167,8 @@ class DataManager:
                 # 15:00 之后，认为数据是完整的
                 return True
 
-        # 如果缓存最新数据是昨天或更早，检查是否是最后一个交易日
-        if last_date < today:
-            # 简化：假设工作日是交易日
-            # 可以进一步检查是否为周末/节假日
-            weekday = last_date.weekday()
-            now_weekday = datetime.now().weekday()
-
-            # 如果今天是周一，上周五的数据可能也是新鲜的
-            if now_weekday == 0 and weekday == 4:
-                return True
-
-            # 其他情况，检查时间差
-            time_diff = datetime.now().date() - last_date
-            if time_diff.days <= 3:
-                return True
-
+        # 如果缓存最新数据不是今天，总是尝试更新
+        # 让 API 去判断是否有新的交易日数据
         return False
 
     def _get_last_date(self, cached_data: List[KLineData]) -> Optional[str]:
