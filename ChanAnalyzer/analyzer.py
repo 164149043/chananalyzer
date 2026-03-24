@@ -391,9 +391,14 @@ class ChanAnalyzer:
         else:
             # 多周期分析
             levels = []
+            day_level_idx = -1  # 记录日线级别的索引
+
             for idx in range(len(chan.lv_list)):
                 level_data = self._analyze_single_level(chan, idx)
                 levels.append(level_data)
+                # 记录日线级别的索引（用于获取当前价格）
+                if chan.lv_list[idx] == KL_TYPE.K_DAY:
+                    day_level_idx = idx
 
             self._analysis = {
                 "code": self.code,
@@ -401,6 +406,10 @@ class ChanAnalyzer:
                 "multi": True,
                 "levels": levels,
             }
+
+            # 多周期分析时，使用日线级别的当前价格作为顶层价格
+            if day_level_idx >= 0 and day_level_idx < len(levels):
+                self._analysis["current_price"] = levels[day_level_idx].get("current_price", 0)
 
         return self._analysis
 
