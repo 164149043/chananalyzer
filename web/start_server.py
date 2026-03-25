@@ -82,7 +82,7 @@ def start_server(host=None, port=None, open_browser=True):
         def open_browser_later():
             import time
             time.sleep(1.5)
-            webbrowser.open(f"{server_url}/static/index.html")
+            webbrowser.open(f"{server_url}/static/login.html")
         threading.Thread(target=open_browser_later, daemon=True).start()
 
     # 启动服务器

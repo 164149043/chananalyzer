@@ -7,6 +7,9 @@
 const STORAGE_KEY = 'chanalyzer_token';
 const USER_ID_KEY = 'chanalyzer_user_id';
 
+// 当前页面路径，用于登录后返回
+const currentPath = window.location.pathname;
+
 /**
  * 认证管理器
  */
@@ -22,13 +25,39 @@ const AuthManager = {
         this.token = localStorage.getItem(STORAGE_KEY);
         this.userId = localStorage.getItem(USER_ID_KEY);
 
-        // 如果没有token，自动创建会话
+        // 如果没有token，跳转到登录页
         if (!this.token) {
-            await this.createSession();
-        } else {
-            // 验证现有会话
-            await this.verifySession();
+            this.redirectToLogin();
+            return;
         }
+
+        // 验证现有会话
+        await this.verifySession();
+    },
+
+    /**
+     * 检查是否已登录
+     */
+    isLoggedIn() {
+        return !!this.token;
+    },
+
+    /**
+     * 跳转到登录页
+     */
+    redirectToLogin() {
+        // 如果当前不在登录页面，跳转到登录页
+        if (!currentPath.includes('login.html')) {
+            window.location.href = '/static/login.html';
+        }
+    },
+
+    /**
+     * 登出
+     */
+    logout() {
+        this.clear();
+        window.location.href = '/static/login.html';
     },
 
     /**
@@ -158,10 +187,9 @@ const AuthManager = {
 
         // 处理401未授权错误
         if (response.status === 401) {
-            // 尝试刷新会话
-            await this.refreshSession();
-            // 重试请求
-            return this.fetch(url, options);
+            // Token 失效，跳转到登录页
+            this.logout();
+            throw new Error('会话已过期，请重新登录');
         }
 
         return response;
