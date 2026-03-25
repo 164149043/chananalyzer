@@ -16,6 +16,24 @@ SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'chanalyzer-secret-key-change-in-produc
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 
+# 管理员账号配置
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
+
+
+def verify_credentials(username: str, password: str) -> bool:
+    """
+    验证管理员账号密码
+
+    Args:
+        username: 用户名
+        password: 密码
+
+    Returns:
+        验证成功返回 True，否则返回 False
+    """
+    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
+
 # 用户数据存储目录
 USER_DATA_DIR = Path(__file__).parent / "users"
 USER_DATA_DIR.mkdir(exist_ok=True)

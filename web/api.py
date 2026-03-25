@@ -24,7 +24,7 @@ from functools import lru_cache
 from collections import defaultdict
 import pandas as pd
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -38,7 +38,8 @@ from web.auth import (
     create_session_token,
     get_user_cache_file,
     get_user_status_file,
-    get_current_user
+    get_current_user,
+    verify_credentials
 )
 
 # 添加项目路径
@@ -165,6 +166,37 @@ async def refresh_session(authorization: str = Header(None)):
     else:
         # Token有效，刷新它
         token, user_id = create_session_token(user_id)
+
+    return {
+        "token": token,
+        "user_id": user_id,
+        "expire_hours": 24
+    }
+
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    """
+    用户登录验证
+
+    请求体:
+        username: 用户名
+        password: 密码
+
+    返回:
+        token: 会话令牌
+        user_id: 用户ID
+        expire_hours: 过期时间（小时）
+    """
+    data = await request.json()
+    username = data.get('username', '')
+    password = data.get('password', '')
+
+    if not verify_credentials(username, password):
+        raise HTTPException(status_code=401, detail="账号或密码错误")
+
+    # 验证成功，创建会话
+    token, user_id = create_session_token(None)
 
     return {
         "token": token,
