@@ -5,20 +5,24 @@
 """
 import os
 import uuid
+from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from typing import Optional
 from functools import wraps
 import json
 from pathlib import Path
 
+# 加载 .env 文件 - 必须在读取环境变量之前调用
+load_dotenv()
+
 # 从环境变量读取密钥，或使用默认值
 SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'chanalyzer-secret-key-change-in-production')
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 
-# 管理员账号配置
-ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
-ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
+# 管理员账号配置（必须从 .env 文件配置）
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
 
 def verify_credentials(username: str, password: str) -> bool:
