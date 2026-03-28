@@ -1362,7 +1362,24 @@ async def get_areas():
 
 @app.get("/api/stock/{code}/signals")
 async def get_stock_signals(code: str):
-    """获取指定股票的买卖点摘要（用于快速分析，使用本地数据库）"""
+    """获取指定股票的买卖点摘要（用于快速分析，使用本地数据库）
+
+    支持股票代码或名称输入（模糊匹配）
+    """
+    # 解析股票代码/名称
+    resolved_code, resolved_name, success = resolve_stock_code(code)
+    if not success:
+        return {
+            "code": code,
+            "current_price": 0,
+            "latest_buy": None,
+            "latest_sell": None,
+            "error": f"未找到股票: {code}"
+        }
+
+    # 使用解析后的代码
+    code = resolved_code
+
     try:
         # 使用本地数据库进行分析
         CChan, DATA_SRC, KL_TYPE, AUTYPE = import_chan_for_cache()
@@ -1404,6 +1421,7 @@ async def get_stock_signals(code: str):
 
         return {
             "code": code,
+            "name": resolved_name,
             "current_price": current_price,
             "latest_buy": latest_buy,
             "latest_sell": latest_sell
@@ -1415,6 +1433,7 @@ async def get_stock_signals(code: str):
         # 返回空数据而不是抛出错误
         return {
             "code": code,
+            "name": resolved_name,
             "current_price": 0,
             "latest_buy": None,
             "latest_sell": None,
@@ -1644,6 +1663,74 @@ def get_stock_name_by_code(code: str) -> str:
         return ""
 
 
+def get_stock_code_by_name(name: str) -> tuple:
+    """
+    根据股票名称模糊查找股票代码
+
+    Args:
+        name: 股票名称或代码（支持模糊匹配）
+
+    Returns:
+        (code, full_name) 股票代码和完整名称，未找到返回 (None, None)
+    """
+    try:
+        import sqlite3
+        db_path = Path(__file__).parent.parent / "chan.db"
+        if not db_path.exists():
+            return None, None
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 1. 先尝试精确匹配代码
+        if name.isdigit():
+            cursor.execute("SELECT code, name FROM stock_info WHERE code = ?", (name,))
+            result = cursor.fetchone()
+            if result:
+                conn.close()
+                return result[0], result[1]
+
+        # 2. 模糊匹配名称
+        cursor.execute(
+            "SELECT code, name FROM stock_info WHERE name LIKE ? ORDER BY LENGTH(name) ASC LIMIT 1",
+            (f"%{name}%",)
+        )
+        result = cursor.fetchone()
+        conn.close()
+
+        return (result[0], result[1]) if result else (None, None)
+    except Exception as e:
+        print(f"股票名称查找失败: {e}")
+        return None, None
+
+
+def resolve_stock_code(input_str: str) -> tuple:
+    """
+    解析股票输入，支持代码或名称
+
+    Args:
+        input_str: 股票代码或名称
+
+    Returns:
+        (code, name, is_resolved) 代码、名称、是否解析成功
+    """
+    input_str = input_str.strip()
+
+    # 如果是纯数字，直接作为代码
+    if input_str.isdigit():
+        # 补全6位代码
+        code = input_str.zfill(6)
+        name = get_stock_name_by_code(code)
+        return code, name, True
+
+    # 否则作为名称查找
+    code, name = get_stock_code_by_name(input_str)
+    if code:
+        return code, name, True
+
+    return None, None, False
+
+
 # ============ 个股分析接口 ============
 
 class AnalyzeRequest(BaseModel):
@@ -1658,13 +1745,42 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
     流式输出分析结果 (SSE)
 
     Args:
-        code: 股票代码
+        code: 股票代码或名称（支持模糊匹配）
         multi: 是否多周期分析
         temperatures: 温度配置 {analyst_a: 0.4, analyst_b: 0.7, decision_maker: 0.3}
+
+    输出流程（顺序执行，确保用户体验）：
+        1. 并行计算分析师A、B（结果缓存）
+        2. 推送分析师A结果 → 等待打字机效果
+        3. 推送分析师B结果 → 等待打字机效果
+        4. 调用决策者 → 推送决策结果
     """
     import time
 
+    # 打字机效果配置
+    TYPEWRITER_SPEED_MS = 10  # 前端打字机速度（毫秒/字符）
+    MAX_DISPLAY_WAIT = 5.0    # 单个分析师最大等待时间（秒）
+    MIN_DISPLAY_WAIT = 1    # 最小等待时间（秒）
+
+    def calculate_display_time(text: str) -> float:
+        """根据文本长度计算打字机显示等待时间（秒）"""
+        char_count = len(text)
+        # 打字机显示时间 = 字符数 * 速度
+        display_time = char_count * TYPEWRITER_SPEED_MS / 1000
+        # 限制在合理范围内
+        return max(MIN_DISPLAY_WAIT, min(display_time, MAX_DISPLAY_WAIT))
+
     try:
+        # 0. 解析股票代码/名称
+        resolved_code, resolved_name, success = resolve_stock_code(code)
+        if not success:
+            yield f"data: {json.dumps({'event': 'error', 'message': f'未找到股票: {code}'})}\n\n"
+            return
+
+        # 使用解析后的代码
+        code = resolved_code
+        stock_display_name = f"{resolved_name} ({code})" if resolved_name else code
+
         # 1. 获取缠论分析数据
         if multi:
             MultiChanAnalyzer = import_multi_chan_analyzer()
@@ -1690,11 +1806,8 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
         # 4. 格式化分析数据
         analysis_data = ai_analyzer.format_analysis_data(analysis, money_flow)
 
-        # 5. 并行调用两个分析师
-        start_time = time.time()
-        analyst_opinions = []
-
-        # 使用线程池并行调用
+        # 5. 阶段控制：并行计算 -> 顺序推送分析师 -> 决策者
+        import time
         from concurrent.futures import ThreadPoolExecutor
 
         # 获取温度配置
@@ -1702,7 +1815,7 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
         temp_b = temperatures.get('analyst_b', 0.7) if temperatures else 0.7
         temp_d = temperatures.get('decision_maker', 0.3) if temperatures else 0.3
 
-        # 创建系统提示和用户提示
+        # 创建系统提示
         system_prompt = ai_analyzer.config.get('prompts', {}).get('analyst_system',
             '你是一位专业的股票技术分析师，精通缠论理论。')
 
@@ -1735,36 +1848,59 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
 
             return analyst_id, response.choices[0].message.content
 
-        # 发送两个分析师的开始事件
-        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 0, 'analyst_name': '分析师A'})}\n\n"
-        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 1, 'analyst_name': '分析师B'})}\n\n"
-
+        # ========== 阶段1：并行计算（不推送事件） ==========
         start_time = time.time()
+        results = {}
+
         with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {
-                executor.submit(run_analyst, 0, temp_a): 0,
-                executor.submit(run_analyst, 1, temp_b): 1
-            }
+            future_a = executor.submit(run_analyst, 0, temp_a)
+            future_b = executor.submit(run_analyst, 1, temp_b)
 
-            for future in futures:
-                try:
-                    analyst_id, opinion = future.result()
-                    analyst_opinions.append({
-                        'analyst_id': analyst_id,
-                        'analyst_name': f"分析师{chr(65 + analyst_id)}",
-                        'model': ai_analyzer.config['analysts']['model'],
-                        'temperature': temp_a if analyst_id == 0 else temp_b,
-                        'opinion': opinion
-                    })
-
-                    # 发送分析师完成事件（完成一个立即发送）
-                    yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': analyst_id, 'analyst_name': f"分析师{chr(65 + analyst_id)}", 'opinion': opinion})}\n\n"
-
-                except Exception as e:
-                    print(f"分析师{futures[future]}分析失败: {e}")
-                    yield f"data: {json.dumps({'event': 'error', 'message': f'分析师分析失败: {str(e)}'})}\n\n"
+            # 等待两个分析师都完成（这里只计算，不发消息）
+            try:
+                results[0] = future_a.result()
+                results[1] = future_b.result()
+            except Exception as e:
+                print(f"分析师分析失败: {e}")
+                yield f"data: {json.dumps({'event': 'error', 'message': f'分析师分析失败: {str(e)}'})}\n\n"
+                return
 
         analyst_time = time.time() - start_time
+
+        # ========== 阶段2：按顺序推送分析师（先A后B），并等待打字机效果 ==========
+        analyst_opinions = []
+
+        # 发送分析师A开始和完成
+        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 0, 'analyst_name': '分析师A'})}\n\n"
+        a_id, a_opinion = results[0]
+        analyst_opinions.append({
+            'analyst_id': a_id,
+            'analyst_name': '分析师A',
+            'model': ai_analyzer.config['analysts']['model'],
+            'temperature': temp_a,
+            'opinion': a_opinion
+        })
+        yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': 0, 'analyst_name': '分析师A', 'opinion': a_opinion})}\n\n"
+
+        # 等待分析师A的打字机效果完成
+        wait_time_a = calculate_display_time(a_opinion)
+        await asyncio.sleep(wait_time_a)
+
+        # 发送分析师B开始和完成
+        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 1, 'analyst_name': '分析师B'})}\n\n"
+        b_id, b_opinion = results[1]
+        analyst_opinions.append({
+            'analyst_id': b_id,
+            'analyst_name': '分析师B',
+            'model': ai_analyzer.config['analysts']['model'],
+            'temperature': temp_b,
+            'opinion': b_opinion
+        })
+        yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': 1, 'analyst_name': '分析师B', 'opinion': b_opinion})}\n\n"
+
+        # 等待分析师B的打字机效果完成
+        wait_time_b = calculate_display_time(b_opinion)
+        await asyncio.sleep(wait_time_b)
 
         # 两个分析师都完成后，发送决策开始事件
         yield f"data: {json.dumps({'event': 'decision_start'})}\n\n"
