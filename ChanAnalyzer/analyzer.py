@@ -118,14 +118,14 @@ class ChanAnalyzer:
             # 30分钟K线，默认获取近30天
             return (now - timedelta(days=30)).strftime("%Y-%m-%d")
         elif kl_type == KL_TYPE.K_DAY:
-            # 日线，默认获取近1年
-            return (now - timedelta(days=365)).strftime("%Y-%m-%d")
-        elif kl_type == KL_TYPE.K_WEEK:
-            # 周线，默认获取近2年
-            return (now - timedelta(days=730)).strftime("%Y-%m-%d")
-        else:
-            # 其他周期，默认获取近3年
+            # 日线，默认获取近3年
             return (now - timedelta(days=1095)).strftime("%Y-%m-%d")
+        elif kl_type == KL_TYPE.K_WEEK:
+            # 周线，默认获取近5年
+            return (now - timedelta(days=1825)).strftime("%Y-%m-%d")
+        else:
+            # 其他周期，默认获取近5年
+            return (now - timedelta(days=1825)).strftime("%Y-%m-%d")
 
     def _load_chan(self) -> CChan:
         """加载缠论分析数据"""
@@ -465,7 +465,7 @@ class MultiChanAnalyzer:
     """
 
     # 多周期默认时间范围（基于最大周期周线）
-    DEFAULT_YEARS = 2  # 默认2年，适合周线分析
+    DEFAULT_YEARS = 5  # 默认5年，适合周线分析
 
     def __init__(
         self,
