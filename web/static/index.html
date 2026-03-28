@@ -1343,9 +1343,9 @@
         </div>
 
         <div class="card">
-          <div class="card-title">股票代码</div>
+          <div class="card-title">股票代码/名称</div>
           <div class="input-group">
-            <input type="text" class="input-field" id="stockCode" placeholder="输入代码，如 000001" maxlength="6" value="000001">
+            <input type="text" class="input-field" id="stockCode" placeholder="输入代码或名称，如 000001 或 平安银行" maxlength="20" value="000001">
           </div>
           <button class="btn btn-primary btn-full" id="analyzeBtn">
             开始分析
@@ -1570,9 +1570,9 @@
             <div class="card">
               <div class="card-title">🎯 个股快速分析</div>
               <div class="input-group">
-                <label class="input-label">股票代码</label>
+                <label class="input-label">股票代码/名称</label>
                 <input type="text" class="input-field" id="quickAnalyzeCode"
-                       placeholder="输入代码，如 000001" maxlength="6">
+                       placeholder="代码或名称，如 平安银行" maxlength="20">
               </div>
               <button class="btn btn-primary btn-full" id="quickAnalyzeBtn">
                 <span>⚡</span> 立即分析
@@ -2156,7 +2156,7 @@
     document.getElementById('analyzeBtn')?.addEventListener('click', async () => {
       const stockCode = document.getElementById('stockCode').value.trim();
       if (!stockCode) {
-        alert('请输入股票代码');
+        alert('请输入股票代码或名称');
         return;
       }
 
@@ -2363,7 +2363,7 @@
           if (outputEl) {
             // 使用打字机效果
             outputEl.innerHTML = '';
-            typeWriterTimers[timerKey] = typeWriter(outputEl, opinion, 15);
+            typeWriterTimers[timerKey] = typeWriter(outputEl, opinion, 10);
           }
           if (statusEl) {
             statusEl.className = 'analyst-status';
@@ -2384,7 +2384,7 @@
           const decisionOutput = document.getElementById('decisionOutput');
           if (decisionOutput && data.decision) {
             decisionOutput.innerHTML = '';
-            typeWriterTimers.decision = typeWriter(decisionOutput, data.decision, 15);
+            typeWriterTimers.decision = typeWriter(decisionOutput, data.decision, 10);
           }
           break;
 
@@ -3071,7 +3071,7 @@
     document.getElementById('quickAnalyzeBtn')?.addEventListener('click', async () => {
       const code = document.getElementById('quickAnalyzeCode').value.trim();
       if (!code) {
-        alert('请输入股票代码');
+        alert('请输入股票代码或名称');
         return;
       }
 
