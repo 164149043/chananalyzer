@@ -207,8 +207,8 @@ function completeAnalyst(analystId, opinion) {
     const outputId = analystId === 0 ? 'analyst-a-output' : 'analyst-b-output';
     const storageKey = analystId === 0 ? 'analystA' : 'analystB';
 
-    // 使用打字机效果显示分析结果
-    typewriterEffect(outputId, opinion, 25, storageKey);
+    // 使用打字机效果显示分析结果（加快速度：10ms）
+    typewriterEffect(outputId, opinion, 10, storageKey);
 }
 
 /**
@@ -232,8 +232,8 @@ function showDecisionLoading() {
  * 完成决策 - 使用打字机效果显示
  */
 function completeDecision(decision) {
-    // 使用打字机效果显示决策结果
-    typewriterEffect('decision-output', decision, 25, 'decision');
+    // 使用打字机效果显示决策结果（加快速度：10ms）
+    typewriterEffect('decision-output', decision, 10, 'decision');
 }
 
 /**
