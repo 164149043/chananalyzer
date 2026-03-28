@@ -1735,9 +1735,11 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
 
             return analyst_id, response.choices[0].message.content
 
-        # 发送分析师开始事件
+        # 发送两个分析师的开始事件
         yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 0, 'analyst_name': '分析师A'})}\n\n"
+        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 1, 'analyst_name': '分析师B'})}\n\n"
 
+        start_time = time.time()
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {
                 executor.submit(run_analyst, 0, temp_a): 0,
@@ -1755,7 +1757,7 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
                         'opinion': opinion
                     })
 
-                    # 发送分析师完成事件
+                    # 发送分析师完成事件（完成一个立即发送）
                     yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': analyst_id, 'analyst_name': f"分析师{chr(65 + analyst_id)}", 'opinion': opinion})}\n\n"
 
                 except Exception as e:
@@ -1764,7 +1766,7 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
 
         analyst_time = time.time() - start_time
 
-        # 6. 调用决策者
+        # 两个分析师都完成后，发送决策开始事件
         yield f"data: {json.dumps({'event': 'decision_start'})}\n\n"
 
         start_time = time.time()
