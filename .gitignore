@@ -10,7 +10,7 @@ config.yaml
 OpenConfig.yaml
 gotify_push.py
 cos_config.yaml
-
+CLAUDE.md
 # 环境变量和敏感配置
 .env
 # ai_config.yaml 已移除此排除 - 无敏感信息，需要上传
@@ -40,7 +40,8 @@ htmlcov/
 前端web页面/
 改进意见/
 输入内容/
-
+前端提示词/
+登录页面代码/
 # 用户会话数据（运行时生成）
 web/users/
 web/cache/
