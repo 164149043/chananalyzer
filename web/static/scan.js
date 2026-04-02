@@ -9,16 +9,30 @@ if (typeof API_BASE === 'undefined') {
         : '/api';
 }
 
-// 买卖点类型映射
-// 注意：Chan库只支持 T1(一买), T1P(一买衍生), T2(二买), T2S(二卖), T3A(三买A), T3B(三买B)
-const BS_TYPE_LABELS = {
-    '1': '一买',
-    '1p': '一买衍生',
-    '2': '二买',
-    '3a': '三买A',
-    '3b': '三买B',
-    '2s': '二卖'
-};
+// 买卖点类型映射 - 根据方向(买/卖)返回正确的中文名称
+// 注意：Chan库买卖点共用类型值，靠 is_buy 区分方向
+function getBsTypeLabel(type, isBuy) {
+    const buyLabels = {
+        '1': '一买',
+        '1p': '一买衍生',
+        '2': '二买',
+        '3a': '三买A',
+        '3b': '三买B',
+        '2s': '类二买'
+    };
+    const sellLabels = {
+        '1': '一卖',
+        '1p': '一卖衍生',
+        '2': '二卖',
+        '3a': '三卖A',
+        '3b': '三卖B',
+        '2s': '二卖'
+    };
+    if (isBuy === false) {
+        return sellLabels[type] || type;
+    }
+    return buyLabels[type] || type;
+}
 
 // 扫描状态管理
 const scanState = {
@@ -211,7 +225,7 @@ function renderResultsTable(direction, stocks) {
         const signal = stock.latest_signal;
         if (!signal) return;
 
-        const typeLabel = BS_TYPE_LABELS[signal.type] || signal.type;
+        const typeLabel = getBsTypeLabel(signal.type, signal.is_buy);
         const typeClass = direction === 'buy' ? 'buy' : 'sell';
 
         // 使用data-label属性，便于移动端卡片式显示
