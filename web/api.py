@@ -62,11 +62,6 @@ def import_chan_analyzer():
     return importlib.import_module('ChanAnalyzer.analyzer').ChanAnalyzer
 
 
-def import_multi_chan_analyzer():
-    """导入 MultiChanAnalyzer 类（绕过 ChanAnalyzer/__init__.py）"""
-    return importlib.import_module('ChanAnalyzer.analyzer').MultiChanAnalyzer
-
-
 def import_multi_ai_analyzer():
     """导入 MultiAIAnalyzer 类（绕过 ChanAnalyzer/__init__.py）"""
     return importlib.import_module('ChanAnalyzer.multi_ai_analyzer').MultiAIAnalyzer
@@ -76,13 +71,6 @@ def import_sector_flow():
     """导入 sector_flow 模块（绕过 ChanAnalyzer/__init__.py）"""
     return importlib.import_module('ChanAnalyzer.sector_flow')
 
-
-def import_chan_for_cache():
-    """导入 CChan 相关模块用于本地数据库分析（绕过 ChanAnalyzer/__init__.py）"""
-    from Chan import CChan
-    from ChanConfig import CChanConfig
-    from Common.CEnum import DATA_SRC, KL_TYPE, AUTYPE
-    return CChan, DATA_SRC, KL_TYPE, AUTYPE
 
 
 # 导入扫描模块（复用已有逻辑）
@@ -1362,7 +1350,7 @@ async def get_areas():
 
 @app.get("/api/stock/{code}/signals")
 async def get_stock_signals(code: str):
-    """获取指定股票的买卖点摘要（用于快速分析，使用本地数据库）
+    """获取指定股票的买卖点摘要（使用 ChanAnalyzer 单日线分析）
 
     支持股票代码或名称输入（模糊匹配）
     """
@@ -1381,48 +1369,52 @@ async def get_stock_signals(code: str):
     code = resolved_code
 
     try:
-        # 使用本地数据库进行分析
-        CChan, DATA_SRC, KL_TYPE, AUTYPE = import_chan_for_cache()
+        # 使用 ChanAnalyzer 单日线进行分析（确保买卖点检测结果一致）
+        ChanAnalyzer = import_chan_analyzer()
+        analyzer = ChanAnalyzer(code=code)
+        analysis = analyzer.get_analysis()
 
-        # 创建 CChan 实例，使用本地数据库
-        chan = CChan(
-            code=code,
-            begin_time="2023-01-01",  # 从 chan.db 读取数据
-            end_time=datetime.now().strftime("%Y-%m-%d"),
-            data_src=DATA_SRC.CACHE_DB,  # 使用本地数据库
-            lv_list=[KL_TYPE.K_DAY],
-            autype=AUTYPE.QFQ,
-        )
+        # 从分析结果中提取买卖点
+        all_signals = analysis.get('buy_signals', []) + analysis.get('sell_signals', [])
 
-        # 获取买卖点
-        bsp_list = chan.get_latest_bsp(number=0)
+        # 按日期排序
+        all_signals.sort(key=lambda s: s.get('date', ''), reverse=True)
 
+        # 找到最新的买点和卖点
         latest_buy = None
         latest_sell = None
-
-        for bsp in bsp_list:
-            signal = {
-                "type": bsp.type2str(),
-                "date": str(bsp.klu.time),
-                "price": bsp.klu.close
-            }
-            if bsp.is_buy:
-                if not latest_buy or signal['date'] > latest_buy.get('date', ''):
-                    latest_buy = signal
-            else:
-                if not latest_sell or signal['date'] > latest_sell.get('date', ''):
-                    latest_sell = signal
+        for signal in all_signals:
+            if signal.get('is_buy') and latest_buy is None:
+                latest_buy = {
+                    "type": signal['type'],
+                    "is_buy": True,
+                    "date": signal['date'],
+                    "price": signal['price']
+                }
+            elif not signal.get('is_buy') and latest_sell is None:
+                latest_sell = {
+                    "type": signal['type'],
+                    "is_buy": False,
+                    "date": signal['date'],
+                    "price": signal['price']
+                }
+            if latest_buy and latest_sell:
+                break
 
         # 获取最新价格
-        current_price = 0
-        if chan[0].lst:
-            last_klu = chan[0].lst[-1].lst[-1]
-            current_price = last_klu.close
+        current_price = analysis.get('current_price', 0)
+
+        # 从数据库获取涨跌幅
+        change_pct = None
+        price_info = scan_stocks_cache.get_latest_price_from_db(code)
+        if price_info:
+            change_pct = price_info.get('change_pct')
 
         return {
             "code": code,
             "name": resolved_name,
             "current_price": current_price,
+            "change_pct": change_pct,
             "latest_buy": latest_buy,
             "latest_sell": latest_sell
         }
@@ -1435,6 +1427,7 @@ async def get_stock_signals(code: str):
             "code": code,
             "name": resolved_name,
             "current_price": 0,
+            "change_pct": None,
             "latest_buy": None,
             "latest_sell": None,
             "error": str(e)
@@ -1736,17 +1729,15 @@ def resolve_stock_code(input_str: str) -> tuple:
 class AnalyzeRequest(BaseModel):
     """分析请求"""
     code: str
-    multi: bool = True
     temperatures: Optional[Dict[str, float]] = None
 
 
-async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict[str, float] = None):
+async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None):
     """
     流式输出分析结果 (SSE)
 
     Args:
         code: 股票代码或名称（支持模糊匹配）
-        multi: 是否多周期分析
         temperatures: 温度配置 {analyst_a: 0.4, analyst_b: 0.7, decision_maker: 0.3}
 
     输出流程（顺序执行，确保用户体验）：
@@ -1782,12 +1773,8 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
         stock_display_name = f"{resolved_name} ({code})" if resolved_name else code
 
         # 1. 获取缠论分析数据
-        if multi:
-            MultiChanAnalyzer = import_multi_chan_analyzer()
-            analyzer = MultiChanAnalyzer(code=code)
-        else:
-            ChanAnalyzer = import_chan_analyzer()
-            analyzer = ChanAnalyzer(code=code)
+        ChanAnalyzer = import_chan_analyzer()
+        analyzer = ChanAnalyzer(code=code)
 
         analysis = analyzer.get_analysis()
 
@@ -1815,9 +1802,12 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
         temp_b = temperatures.get('analyst_b', 0.7) if temperatures else 0.7
         temp_d = temperatures.get('decision_maker', 0.3) if temperatures else 0.3
 
-        # 创建系统提示
-        system_prompt = ai_analyzer.config.get('prompts', {}).get('analyst_system',
-            '你是一位专业的股票技术分析师，精通缠论理论。')
+        # 创建系统提示（使用 prompts 模块）
+        try:
+            from ChanAnalyzer.prompts.analyst import get_analyst_system_prompt
+            system_prompt = get_analyst_system_prompt()
+        except ImportError:
+            system_prompt = '你是一位专业的股票技术分析师，精通缠论理论。'
 
         # 定义分析师任务
         def run_analyst(analyst_id, temperature):
@@ -1836,8 +1826,9 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
 
 请简明扼要，重点突出。"""
 
+            models = ai_analyzer.config['analysts']['models']
             response = ai_analyzer.client.chat.completions.create(
-                model=ai_analyzer.config['analysts']['model'],
+                model=models[analyst_id] if analyst_id < len(models) else models[-1],
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -1876,7 +1867,7 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
         analyst_opinions.append({
             'analyst_id': a_id,
             'analyst_name': '分析师A',
-            'model': ai_analyzer.config['analysts']['model'],
+            'model': models[0] if len(models) > 0 else models[-1],
             'temperature': temp_a,
             'opinion': a_opinion
         })
@@ -1892,7 +1883,7 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
         analyst_opinions.append({
             'analyst_id': b_id,
             'analyst_name': '分析师B',
-            'model': ai_analyzer.config['analysts']['model'],
+            'model': models[1] if len(models) > 1 else models[-1],
             'temperature': temp_b,
             'opinion': b_opinion
         })
@@ -1923,8 +1914,12 @@ async def stream_analyze_stock(code: str, multi: bool = True, temperatures: Dict
 
 请简明扼要，**最终决策要明确**，不要模棱两可。"""
 
-        decision_system = ai_analyzer.config.get('prompts', {}).get('decision_maker_system',
-            '你是一位资深的投资决策专家，擅长综合多个分析师的意见做出最终决策。')
+        # 决策者系统提示（使用 prompts 模块）
+        try:
+            from ChanAnalyzer.prompts.decision_maker import get_decision_maker_system_prompt
+            decision_system = get_decision_maker_system_prompt()
+        except ImportError:
+            decision_system = '你是一位资深的投资决策专家，擅长综合多个分析师的意见做出最终决策。'
 
         response = ai_analyzer.client.chat.completions.create(
             model=ai_analyzer.config['decision_maker']['model'],
@@ -1964,7 +1959,6 @@ async def analyze_stock(request: AnalyzeRequest):
     请求体:
     {
         "code": "000001",
-        "multi": true,
         "temperatures": {
             "analyst_a": 0.4,
             "analyst_b": 0.7,
@@ -1975,7 +1969,6 @@ async def analyze_stock(request: AnalyzeRequest):
     return StreamingResponse(
         stream_analyze_stock(
             code=request.code,
-            multi=request.multi,
             temperatures=request.temperatures
         ),
         media_type="text/event-stream"
