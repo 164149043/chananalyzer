@@ -1306,6 +1306,39 @@
       color: var(--text-tertiary);
       font-size: 0.7rem;
     }
+
+    /* 筛选搜索框 */
+    .filter-search {
+      width: 100%;
+      padding: var(--space-sm) var(--space-md);
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      outline: none;
+      transition: all 0.2s ease;
+      margin-bottom: var(--space-sm);
+      box-sizing: border-box;
+    }
+
+    .filter-search:focus {
+      border-color: var(--zhu-red);
+      box-shadow: 0 0 0 3px var(--zhu-red-dim);
+    }
+
+    .filter-search::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    .checkbox-group.filtered .checkbox-item {
+      display: none;
+    }
+
+    .checkbox-group.filtered .checkbox-item.match {
+      display: flex;
+    }
   </style>
 </head>
 <body>
@@ -1506,7 +1539,16 @@
             <label class="input-label">卖点类型</label>
             <div class="checkbox-group" id="sellTypesGroup">
               <label class="checkbox-item selected">
-                <input type="checkbox" value="2s" checked> 二卖
+                <input type="checkbox" value="1" checked> 一卖
+              </label>
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="2" checked> 二卖
+              </label>
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="3a" checked> 三卖A
+              </label>
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="3b" checked> 三卖B
               </label>
             </div>
           </div>
@@ -1544,8 +1586,20 @@
             <div class="stat-value" id="sellTotal">0</div>
           </div>
           <div class="stat-card">
+            <div class="stat-label">一卖</div>
+            <div class="stat-value" id="sell1Count">0</div>
+          </div>
+          <div class="stat-card">
             <div class="stat-label">二卖</div>
-            <div class="stat-value" id="sell2sCount">0</div>
+            <div class="stat-value" id="sell2Count">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">三卖A</div>
+            <div class="stat-value" id="sell3aCount">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">三卖B</div>
+            <div class="stat-value" id="sell3bCount">0</div>
           </div>
         </div>
 
@@ -1595,6 +1649,7 @@
                 <button class="btn-text" id="selectAllIndustries">全选</button>
                 <button class="btn-text" id="clearAllIndustries">清空</button>
               </div>
+              <input type="text" class="filter-search" id="industrySearch" placeholder="搜索行业名称...">
               <div class="checkbox-group" id="industryFilterGroup">
                 <div class="loading-industries">加载中...</div>
               </div>
@@ -1610,6 +1665,7 @@
                 <button class="btn-text" id="selectAllAreas">全选</button>
                 <button class="btn-text" id="clearAllAreas">清空</button>
               </div>
+              <input type="text" class="filter-search" id="areaSearch" placeholder="搜索地区名称...">
               <div class="checkbox-group" id="areaFilterGroup">
                 <div style="padding:var(--space-md);color:var(--text-tertiary);text-align:center;">加载中...</div>
               </div>
@@ -1655,7 +1711,16 @@
                 <label class="input-label">卖点类型</label>
                 <div class="checkbox-group">
                   <label class="checkbox-item selected">
-                    <input type="checkbox" value="2s" checked> 二卖
+                    <input type="checkbox" value="1" checked> 一卖
+                  </label>
+                  <label class="checkbox-item selected">
+                    <input type="checkbox" value="2" checked> 二卖
+                  </label>
+                  <label class="checkbox-item selected">
+                    <input type="checkbox" value="3a" checked> 三卖A
+                  </label>
+                  <label class="checkbox-item selected">
+                    <input type="checkbox" value="3b" checked> 三卖B
                   </label>
                 </div>
               </div>
@@ -1784,21 +1849,45 @@
               </div>
             </div>
             <div class="bs-compare-item">
+              <div class="bs-compare-type sell">第一类卖点 (一卖)</div>
+              <div class="bs-compare-desc">
+                上涨趋势中，最后一个中枢上沿出现的背驰点。这是上涨趋势结束、下跌趋势开始的转折点，与一买互为镜像。
+              </div>
+            </div>
+            <div class="bs-compare-item">
               <div class="bs-compare-type">第二类买点 (二买)</div>
               <div class="bs-compare-desc">
                 第一类买点之后，回调不破前低形成的买点。安全性较高，是实际操作中最重要的买点类型。
               </div>
             </div>
             <div class="bs-compare-item">
-              <div class="bs-compare-type">第三类买点 (三买)</div>
-              <div class="bs-compare-desc">
-                上涨趋势中，回调不跌破中枢上沿形成的买点。分为三买A（第一次突破）和三买B（回踩确认），代表上涨趋势延续。
-              </div>
-            </div>
-            <div class="bs-compare-item">
               <div class="bs-compare-type sell">第二类卖点 (二卖)</div>
               <div class="bs-compare-desc">
                 第一类卖点之后，反弹不破前高形成的卖点。对应二买的反向操作，是上涨趋势转弱的重要信号。
+              </div>
+            </div>
+            <div class="bs-compare-item">
+              <div class="bs-compare-type">第三类买点A (三买A)</div>
+              <div class="bs-compare-desc">
+                中枢在一类买点之后，价格向上突破中枢上沿后形成的买点。代表趋势由盘整转为上涨的确认信号。
+              </div>
+            </div>
+            <div class="bs-compare-item">
+              <div class="bs-compare-type sell">第三类卖点A (三卖A)</div>
+              <div class="bs-compare-desc">
+                中枢在一类卖点之后，价格向下跌破中枢下沿后形成的卖点。代表趋势由盘整转为下跌的确认信号。
+              </div>
+            </div>
+            <div class="bs-compare-item">
+              <div class="bs-compare-type">第三类买点B (三买B)</div>
+              <div class="bs-compare-desc">
+                中枢在一类买点之前，价格回调到中枢上沿附近获得支撑后形成的买点。代表上涨趋势延续中的回调买入机会。
+              </div>
+            </div>
+            <div class="bs-compare-item">
+              <div class="bs-compare-type sell">第三类卖点B (三卖B)</div>
+              <div class="bs-compare-desc">
+                中枢在一类卖点之前，价格反弹到中枢下沿附近遇到阻力后形成的卖点。代表下跌趋势延续中的反弹卖出机会。
               </div>
             </div>
           </div>
@@ -1836,14 +1925,15 @@
         <div class="card">
           <div class="card-title">分析设置</div>
 
-          <div class="setting-item">
+          <!-- 日线分析模式（已固定，） -->
+          <div class="setting-item" style="display:none">
             <div>
               <div class="setting-label">多周期分析</div>
-              <div class="setting-desc">同时分析日线、周线等多个周期</div>
+              <div class="setting-desc">已移除，div>
             </div>
             <div class="setting-control">
               <label class="toggle-switch">
-                <input type="checkbox" id="multiPeriod" checked>
+                <input type="checkbox" id="multiPeriod" disabled>
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -2193,7 +2283,6 @@
       const url = `${API_BASE}/stock/analyze`;
       const requestBody = {
         code: stockCode,
-        multi: true,
         temperatures: {
           analyst_a: tempA,
           analyst_b: tempB,
@@ -2410,15 +2499,29 @@
       sell: { scanning: false, pollInterval: null }
     };
 
-    // 买点类型标签
-    const BS_TYPE_LABELS = {
-      '1': '一买',
-      '1p': '一买衍生',
-      '2': '二买',
-      '3a': '三买A',
-      '3b': '三买B',
-      '2s': '二卖'
-    };
+    // 买卖点类型标签 - 根据方向(买/卖)返回正确的中文名称
+    function getBsTypeLabel(type, isBuy) {
+      const buyLabels = {
+        '1': '一买',
+        '1p': '一买衍生',
+        '2': '二买',
+        '3a': '三买A',
+        '3b': '三买B',
+        '2s': '类二买'
+      };
+      const sellLabels = {
+        '1': '一卖',
+        '1p': '一卖衍生',
+        '2': '二卖',
+        '3a': '三卖A',
+        '3b': '三卖B',
+        '2s': '二卖'
+      };
+      if (isBuy === false) {
+        return sellLabels[type] || type;
+      }
+      return buyLabels[type] || type;
+    }
 
     // 启动买点扫描
     document.getElementById('buyScanBtn')?.addEventListener('click', async () => {
@@ -2720,10 +2823,10 @@
         // 获取主要买卖点类型
         let typeLabel = '--';
         if (signal && signal.type) {
-          typeLabel = BS_TYPE_LABELS[signal.type] || signal.type;
+          typeLabel = getBsTypeLabel(signal.type, signal.is_buy);
         } else if (stock.signals && stock.signals.length > 0) {
           // 如果没有 latest_signal，使用第一个信号
-          typeLabel = BS_TYPE_LABELS[stock.signals[0].type] || stock.signals[0].type;
+          typeLabel = getBsTypeLabel(stock.signals[0].type, stock.signals[0].is_buy);
         }
 
         const signalDate = signal?.date || (stock.signals?.[0]?.date) || '--';
@@ -2778,16 +2881,21 @@
 
     // 更新卖点统计
     function updateSellScanStats(stocks) {
-      let count2s = 0;
+      const stats = { '1': 0, '2': 0, '3a': 0, '3b': 0 };
 
       stocks.forEach(stock => {
         stock.signals?.forEach(signal => {
-          if (signal.type === '2s') count2s++;
+          if (signal.type in stats && signal.is_buy === false) {
+            stats[signal.type]++;
+          }
         });
       });
 
       document.getElementById('sellTotal').textContent = stocks.length;
-      document.getElementById('sell2sCount').textContent = count2s;
+      document.getElementById('sell1Count').textContent = stats['1'];
+      document.getElementById('sell2Count').textContent = stats['2'];
+      document.getElementById('sell3aCount').textContent = stats['3a'];
+      document.getElementById('sell3bCount').textContent = stats['3b'];
     }
 
     // 重置买点扫描UI
@@ -2910,6 +3018,29 @@
       updateIndustryCount();
     });
 
+    // 行业搜索过滤
+    document.getElementById('industrySearch')?.addEventListener('input', function() {
+      const keyword = this.value.trim().toLowerCase();
+      const container = document.getElementById('industryFilterGroup');
+      const items = container.querySelectorAll('.checkbox-item');
+
+      if (!keyword) {
+        container.classList.remove('filtered');
+        items.forEach(item => item.classList.remove('match'));
+        return;
+      }
+
+      container.classList.add('filtered');
+      items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(keyword)) {
+          item.classList.add('match');
+        } else {
+          item.classList.remove('match');
+        }
+      });
+    });
+
     // 加载地区列表
     async function loadAreas() {
       if (filterState.areasLoaded) return;
@@ -2965,6 +3096,29 @@
         cb.parentElement.classList.remove('selected');
       });
       updateAreaCount();
+    });
+
+    // 地区搜索过滤
+    document.getElementById('areaSearch')?.addEventListener('input', function() {
+      const keyword = this.value.trim().toLowerCase();
+      const container = document.getElementById('areaFilterGroup');
+      const items = container.querySelectorAll('.checkbox-item');
+
+      if (!keyword) {
+        container.classList.remove('filtered');
+        items.forEach(item => item.classList.remove('match'));
+        return;
+      }
+
+      container.classList.add('filtered');
+      items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(keyword)) {
+          item.classList.add('match');
+        } else {
+          item.classList.remove('match');
+        }
+      });
     });
 
     // 监听地区复选框变化
@@ -3089,13 +3243,31 @@
         const contentDiv = document.getElementById('quickAnalyzeContent');
 
         let html = '';
+
+        // 股票名称
+        if (data.name) {
+          html += `<div class="quick-result-item">
+            <span class="quick-result-label">股票名称</span>
+            <span class="quick-result-value">${data.name}</span>
+          </div>`;
+        }
+
         html += `<div class="quick-result-item">
           <span class="quick-result-label">当前价格</span>
           <span class="quick-result-value">${data.current_price ? data.current_price.toFixed(2) : '--'}</span>
         </div>`;
 
+        // 涨跌幅
+        if (data.change_pct !== undefined && data.change_pct !== null) {
+          const pctColor = data.change_pct >= 0 ? 'var(--zhu-red)' : 'var(--text-green)';
+          html += `<div class="quick-result-item">
+            <span class="quick-result-label">涨跌幅</span>
+            <span class="quick-result-value" style="color:${pctColor};font-weight:600">${data.change_pct >= 0 ? '+' : ''}${data.change_pct.toFixed(2)}%</span>
+          </div>`;
+        }
+
         if (data.latest_buy) {
-          const typeLabel = BS_TYPE_LABELS[data.latest_buy.type] || data.latest_buy.type;
+          const typeLabel = getBsTypeLabel(data.latest_buy.type, true);
           html += `<div class="quick-result-item">
             <span class="quick-result-label">最新买点</span>
             <span class="stock-signal">${typeLabel}</span>
@@ -3113,7 +3285,7 @@
         }
 
         if (data.latest_sell) {
-          const typeLabel = BS_TYPE_LABELS[data.latest_sell.type] || data.latest_sell.type;
+          const typeLabel = getBsTypeLabel(data.latest_sell.type, false);
           html += `<div class="quick-result-item">
             <span class="quick-result-label">最新卖点</span>
             <span class="stock-signal sell">${typeLabel}</span>
@@ -3122,6 +3294,12 @@
             <span class="quick-result-label">信号日期</span>
             <span class="quick-result-value">${data.latest_sell.date || '--'}</span>
           </div>`;
+          if (data.latest_sell.price) {
+            html += `<div class="quick-result-item">
+              <span class="quick-result-label">信号价格</span>
+              <span class="quick-result-value">${data.latest_sell.price.toFixed(2)}</span>
+            </div>`;
+          }
         }
 
         if (!data.latest_buy && !data.latest_sell) {
@@ -3315,9 +3493,9 @@
 
         let typeLabel = '--';
         if (signal && signal.type) {
-          typeLabel = BS_TYPE_LABELS[signal.type] || signal.type;
+          typeLabel = getBsTypeLabel(signal.type, signal.is_buy);
         } else if (stock.signals && stock.signals.length > 0) {
-          typeLabel = BS_TYPE_LABELS[stock.signals[0].type] || stock.signals[0].type;
+          typeLabel = getBsTypeLabel(stock.signals[0].type, stock.signals[0].is_buy);
         }
 
         const signalDate = signal?.date || (stock.signals?.[0]?.date) || '--';
