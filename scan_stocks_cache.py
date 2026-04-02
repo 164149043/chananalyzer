@@ -355,13 +355,12 @@ def analyze_stock(
     sell_types: List[str],
     begin_date: str = None,
     end_date: str = None,
-    use_weekly: bool = False,
     config: CChanConfig = None,
 ) -> Optional[Dict[str, Any]]:
     """
     分析单只股票的买卖点
 
-    使用本地数据库进行缠论分析
+    使用本地数据库进行日线缠论分析
     """
     try:
         # 设置默认日期范围
@@ -370,19 +369,13 @@ def analyze_stock(
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
-        # 设置K线级别
-        if use_weekly:
-            lv_list = [KL_TYPE.K_DAY, KL_TYPE.K_WEEK]
-        else:
-            lv_list = [KL_TYPE.K_DAY]
-
-        # 创建缠论分析对象
+        # 创建缠论分析对象（仅日线）
         chan = CChan(
             code=code,
             begin_time=begin_date,
             end_time=end_date,
             data_src=DATA_SRC.CACHE_DB,
-            lv_list=lv_list,
+            lv_list=[KL_TYPE.K_DAY],
             config=config,
             autype=AUTYPE.QFQ,
         )
@@ -405,24 +398,26 @@ def analyze_stock(
 
             bsp_type = bsp.type2str()
 
-            # 直接根据类型判断，不依赖 is_buy 属性（因为 is_buy 有时与 type 不一致）
-            # 买入类型: 1, 1p, 2, 3a, 3b
-            # 卖出类型: 1s, 2s, 3a, 3b（注意：卖出也有3a/3b）
-            if bsp_type in buy_types:
+            # 同时检查类型和方向，避免买卖点交叉匹配
+            # 买入: bsp_type 匹配且 is_buy=True
+            # 卖出: bsp_type 匹配且 is_buy=False
+            if bsp_type in buy_types and bsp.is_buy:
                 matched_signals.append({
                     'type': bsp_type,
+                    'is_buy': bsp.is_buy,
                     'direction': '买入',
-                    'date': str(bsp.klu.time),
+                    'date': bsp.klu.time.toDateStr('-'),
                     'price': float(bsp.klu.close),
-                    'period': '周线' if use_weekly else '日线',
+                    'period': '日线',
                 })
-            elif bsp_type in sell_types:
+            elif bsp_type in sell_types and not bsp.is_buy:
                 matched_signals.append({
                     'type': bsp_type,
+                    'is_buy': bsp.is_buy,
                     'direction': '卖出',
-                    'date': str(bsp.klu.time),
+                    'date': bsp.klu.time.toDateStr('-'),
                     'price': float(bsp.klu.close),
-                    'period': '周线' if use_weekly else '日线',
+                    'period': '日线',
                 })
 
         if not matched_signals:
@@ -448,14 +443,13 @@ def scan_stocks(
     sell_types: List[str] = None,
     begin_date: str = None,
     end_date: str = None,
-    use_weekly: bool = False,
     bi_strict: bool = True,
     show_money_flow: bool = False,
     sort_by_money_flow: bool = False,
     min_money_flow: float = 0,
     verbose: bool = True,
     progress_callback: callable = None,
-    # 新增筛选参数
+    # 筛选参数
     industries: List[str] = None,
     areas: List[str] = None,
     exclude_st: bool = True,
@@ -470,7 +464,6 @@ def scan_stocks(
         sell_types: 卖点类型列表
         begin_date: 开始日期
         end_date: 结束日期
-        use_weekly: 是否使用周线
         bi_strict: 是否严格笔模式
         show_money_flow: 是否显示资金流向
         sort_by_money_flow: 是否按资金流向排序
@@ -544,7 +537,6 @@ def scan_stocks(
             sell_types=sell_types,
             begin_date=begin_date,
             end_date=end_date,
-            use_weekly=use_weekly,
             config=config,
         )
 
@@ -749,7 +741,6 @@ def main():
                        help='筛选卖出类型')
     parser.add_argument('--begin', help='开始日期')
     parser.add_argument('--end', help='结束日期')
-    parser.add_argument('--weekly', action='store_true', help='使用周线分析')
     parser.add_argument('--no-strict', action='store_true', help='关闭笔严格模式')
     parser.add_argument('--output', help='保存结果到文件')
 
@@ -813,7 +804,6 @@ def main():
     print(f"筛选买入类型: {args.buy}")
     if args.sell:
         print(f"筛选卖出类型: {args.sell}")
-    print(f"周期: {'周线' if args.weekly else '日线'}")
     print(f"笔严格模式: {not args.no_strict}")
 
     results = scan_stocks(
@@ -822,7 +812,6 @@ def main():
         sell_types=args.sell,
         begin_date=args.begin,
         end_date=args.end,
-        use_weekly=args.weekly,
         bi_strict=not args.no_strict,
         show_money_flow=args.show_money_flow,
         sort_by_money_flow=args.sort_by_money_flow,
