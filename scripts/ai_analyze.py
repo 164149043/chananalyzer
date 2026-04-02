@@ -25,7 +25,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Common.CEnum import KL_TYPE
-from ChanAnalyzer import ChanAnalyzer, MultiChanAnalyzer, AIAnalyzer
+from ChanAnalyzer import ChanAnalyzer, AIAnalyzer
 from ChanAnalyzer.sector_flow import get_stock_money_flow
 
 
@@ -55,19 +55,10 @@ def get_date_range() -> tuple:
     return begin or None, end or None
 
 
-def get_analysis_type() -> tuple:
-    """获取分析类型"""
-    print("\n选择分析类型:")
-    print("  1. 日线分析")
-    print("  2. 周线分析")
-    print("  3. 日线+周线（多周期）")
-    print("  4. 自定义")
-
-    while True:
-        choice = input("请选择 (1-4，默认 3): ").strip() or "3"
-        if choice in ['1', '2', '3', '4']:
-            return choice
-        print("请输入有效选项 1-4")
+def get_analysis_type() -> str:
+    """获取分析类型（仅日线）"""
+    print("\n分析类型: 日线")
+    return "1"
 
 
 def get_provider() -> str:
@@ -156,56 +147,13 @@ def interactive_mode(args):
             print(f"\n正在获取数据...")
             print("-" * 40)
 
-            # 执行缠论分析
-            if analysis_type == '1':
-                # 日线
-                analyzer = ChanAnalyzer(
-                    code=code,
-                    begin_date=begin_date,
-                    end_date=end_date,
-                    kl_types=KL_TYPE.K_DAY
-                )
-                analysis = analyzer.get_analysis()
-
-            elif analysis_type == '2':
-                # 周线
-                analyzer = ChanAnalyzer(
-                    code=code,
-                    begin_date=begin_date,
-                    end_date=end_date,
-                    kl_types=KL_TYPE.K_WEEK
-                )
-                analysis = analyzer.get_analysis()
-
-            elif analysis_type == '3':
-                # 多周期
-                analyzer = MultiChanAnalyzer(
-                    code=code,
-                    begin_date=begin_date,
-                    end_date=end_date
-                )
-                analysis = analyzer.get_analysis()
-
-            else:  # choice == '4'
-                # 自定义
-                print("\n选择周期:")
-                print("  1. 1分钟  2. 5分钟  3. 15分钟  4. 30分钟")
-                print("  5. 日线  6. 周线  7. 月线")
-                period_map = {
-                    '1': KL_TYPE.K_1M, '2': KL_TYPE.K_5M, '3': KL_TYPE.K_15M,
-                    '4': KL_TYPE.K_30M, '5': KL_TYPE.K_DAY, '6': KL_TYPE.K_WEEK,
-                    '7': KL_TYPE.K_MON
-                }
-                period_choice = input("请选择 (1-7): ").strip() or "5"
-                kl_type = period_map.get(period_choice, KL_TYPE.K_DAY)
-
-                analyzer = ChanAnalyzer(
-                    code=code,
-                    begin_date=begin_date,
-                    end_date=end_date,
-                    kl_types=kl_type
-                )
-                analysis = analyzer.get_analysis()
+            # 执行缠论分析（日线）
+            analyzer = ChanAnalyzer(
+                code=code,
+                begin_date=begin_date,
+                end_date=end_date,
+            )
+            analysis = analyzer.get_analysis()
 
             # 获取资金流向
             money_flow = None
@@ -277,18 +225,11 @@ def command_mode(args):
     print("-" * 40)
 
     try:
-        # 执行缠论分析
-        if args.multi:
-            analyzer = MultiChanAnalyzer(
-                code=code,
-                begin_date=args.begin_date,
-                end_date=args.end_date
-            )
-        else:
-            analyzer = ChanAnalyzer(
-                code=code,
-                begin_date=args.begin_date,
-                end_date=args.end_date,
+        # 执行缠论分析（日线）
+        analyzer = ChanAnalyzer(
+            code=code,
+            begin_date=args.begin_date,
+            end_date=args.end_date,
             )
 
         analysis = analyzer.get_analysis()
