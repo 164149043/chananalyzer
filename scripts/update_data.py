@@ -102,7 +102,8 @@ def update_stock(
     kl_types: List[KL_TYPE],
     data_manager: DataManager,
     refresh: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    silent: bool = False
 ) -> dict:
     """
     更新单只股票的数据
@@ -161,10 +162,12 @@ def update_stock(
                 "first_date": info.get("first_date"),
                 "last_date": info.get("last_date"),
             }
-            logger.info(f"[{code} {kl_type_str}] 更新成功: {info.get('count', 0)} 条")
+            if not silent:
+                logger.info(f"[{code} {kl_type_str}] 更新成功: {info.get('count', 0)} 条")
 
         except Exception as e:
-            logger.error(f"[{code} {kl_type_str}] 更新失败: {e}")
+            if not silent:
+                logger.error(f"[{code} {kl_type_str}] 更新失败: {e}")
             result["kl_types"][kl_type_str] = {"error": str(e)}
             result["success"] = False
 
@@ -195,24 +198,63 @@ def update_all_stocks(
     success_count = 0
     fail_count = 0
 
-    # 使用进度条
-    iterator = codes
     if HAS_TQDM:
-        iterator = tqdm(codes, desc="更新进度", unit="股")
+        # 抑制 DataManager 内部日志，避免打断 tqdm 显示
+        dm_logger = logging.getLogger('ChanAnalyzer.data_manager')
+        original_level = dm_logger.level
+        dm_logger.setLevel(logging.CRITICAL)
 
-    for code in iterator:
-        result = update_stock(code, kl_types, data_manager, refresh)
+        # 两行显示：上方显示当前股票数据（原地更新），下方显示进度条
+        info_bar = tqdm(
+            total=len(codes), position=0,
+            bar_format='{desc}',
+            leave=True
+        )
+        pbar = tqdm(
+            codes, desc="更新进度", unit="股",
+            position=1, leave=True
+        )
+    else:
+        info_bar = None
+        pbar = codes
+
+    for code in (pbar if HAS_TQDM else codes):
+        result = update_stock(code, kl_types, data_manager, refresh, silent=HAS_TQDM)
 
         if result["success"]:
             success_count += 1
         else:
             fail_count += 1
 
+        # 构建信息字符串
+        parts = []
+        for kl_str, info in result["kl_types"].items():
+            if "error" in info:
+                parts.append(f"{kl_str}:失败")
+            else:
+                parts.append(f"{kl_str}:{info['count']}条")
+
+        status = "✓" if result["success"] else "✗"
+
+        if HAS_TQDM:
+            info_bar.set_description_str(
+                f"  {status} {code}  {' | '.join(parts)}  "
+                f"(成功:{success_count} 失败:{fail_count})"
+            )
+            pbar.set_postfix(成功=success_count, 失败=fail_count)
+        else:
+            print(f"{status} {code}  {' | '.join(parts)}")
+
         # API 频率限制：每只股票之间延迟 0.2 秒
-        # 这样每分钟最多约 300 次请求，低于 Tushare 的 500 次限制
         time.sleep(0.2)
 
-    logger.info(f"\n更新完成: 成功 {success_count}, 失败 {fail_count}")
+    if HAS_TQDM:
+        info_bar.close()
+        pbar.close()
+        # 恢复日志级别
+        dm_logger.setLevel(original_level)
+
+    print(f"\n更新完成: 成功 {success_count}, 失败 {fail_count}")
 
 
 def main():
