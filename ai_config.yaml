@@ -2,23 +2,40 @@
 # 多AI协作分析配置
 # ================================
 
-# AI服务提供商配置
+# ================================
+# AI服务提供商配置（切换方案时取消注释对应块）
+# ================================
+
+# ----- 方案1: DeepSeek（默认） -----
 provider:
   name: deepseek
   api_key_env: DEEPSEEK_API_KEY
   base_url: https://api.deepseek.com
 
+# ----- 方案2: 硅基流动（取消下方注释，注释掉方案1） -----
+# provider:
+#   name: siliconflow
+#   api_key_env: SILICONFLOW_API_KEY
+#   base_url: https://api.siliconflow.cn/v1
+
 # ================================
-# 分析师配置
+# 分析师配置（每位分析师可独立配置模型和温度）
 # ================================
 analysts:
   # 分析师数量
   count: 2
 
-  # 使用的模型
-  model: deepseek-chat
+  # 各分析师模型（按顺序对应 分析师A、分析师B）
+  # DeepSeek 模型:           deepseek-chat, deepseek-reasoner
+  # 硅基流动 模型:           deepseek-ai/DeepSeek-V3
+  #                         deepseek-ai/DeepSeek-R1
+  #                         Qwen/Qwen2.5-72B-Instruct
+  #                         Pro/Qwen/Qwen2.5-72B-Instruct
+  models:
+    - deepseek-chat    # 分析师A 模型
+    - deepseek-chat    # 分析师B 模型
 
-  # 温度参数（不同分析师使用不同温度，获得多样化观点）
+  # 各分析师温度（不同温度获得多样化观点）
   temperatures: [0.4, 0.7]  # 分析师A偏保守，分析师B偏激进
 
   # 最大输出token数
@@ -28,7 +45,10 @@ analysts:
 # 决策者配置
 # ================================
 decision_maker:
-  # 使用的模型（深度推理模型）
+  # 使用的模型
+  # DeepSeek:          deepseek-reasoner
+  # 硅基流动:           deepseek-ai/DeepSeek-R1
+  #                    Pro/Qwen/Qwen2.5-72B-Instruct
   model: deepseek-reasoner
 
   # 温度参数
@@ -44,13 +64,21 @@ prompts:
   # 分析师系统提示词
   analyst_system: |
     你是一位专业的股票技术分析师，精通缠论理论。
-    请根据缠论数据给出你的交易策略。
+    请根据缠论数据给出你的交易策略，包括：
+    趋势判断
+    支撑压力位
+    买卖点分析
+    风险提示
+    操作建议（买入/卖出/观望）
 
   # 决策者系统提示词
   decision_maker_system: |
-    你是一位资深的投资决策专家，擅长综合多个分析师的意见做出最终决策。
-    你会收到两位分析师的意见，需要综合评估后给出明确的操作建议。
-    你看不到原始缠论数据，只能根据分析师的判断进行决策。
+    你是一位资深的投资决策专家，精通缠论策略，擅长综合多个分析师的意见做出最终决策。
+    你看不到原始缠论数据，你会收到两位分析师的意见，需要综合评估后给出明确的操作建议。
+    请综合以上两位分析师的意见，给出最终的交易决策：
+    给出明确的操作方向（买入/卖出/观望）
+    给出交易策略
+    请简明扼要，**最终决策要明确**，不要模棱两可。""
 
 # ================================
 # 输出配置
