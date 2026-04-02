@@ -3,7 +3,7 @@
 
 封装 CChan 引擎，提供简洁的缠论分析接口
 
-支持多周期分析：60分钟、1天、1周
+仅支持日线分析
 """
 import os
 from datetime import datetime, timedelta
@@ -46,14 +46,10 @@ class ChanAnalyzer:
     """
     缠论分析器
 
-    使用 Tushare 数据源进行缠论分析，输出笔、线段、中枢、买卖点等结果
-
-    支持多周期分析：日线、周线
+    使用本地缓存数据库进行日线缠论分析，输出笔、线段、中枢、买卖点等结果
 
     示例:
         >>> from ChanAnalyzer import ChanAnalyzer
-        >>>
-        >>> # 单周期分析
         >>> analyzer = ChanAnalyzer(code="000001")
         >>> summary = analyzer.get_summary()
         >>> print(summary)
@@ -66,19 +62,16 @@ class ChanAnalyzer:
         end_date: Optional[str] = None,
         token: Optional[str] = None,
         config: Optional[dict[str, Any]] = None,
-        kl_types: Optional[Union[KL_TYPE, List[KL_TYPE]]] = None,
     ):
         """
         初始化分析器
 
         Args:
             code: 股票代码 (如 "000001")
-            begin_date: 开始日期 (如 "2023-01-01", 默认根据周期自动设置)
-            end_date: 结束日期 (如 "2024-12-31", 默认为当前)
+            begin_date: 开始日期 (默认近5年)
+            end_date: 结束日期 (默认当前)
             token: Tushare Token (默认从环境变量 TUSHARE_TOKEN 读取)
             config: 缠论配置参数
-            kl_types: K线周期类型，默认为 [KL_TYPE.K_DAY]
-                    可选: KL_TYPE.K_DAY, KL_TYPE.K_WEEK, KL_TYPE.K_MON
         """
         self.code = code
         self.begin_date = begin_date
@@ -87,14 +80,6 @@ class ChanAnalyzer:
         # 设置 Token
         if token:
             os.environ["TUSHARE_TOKEN"] = token
-
-        # 处理周期参数
-        if kl_types is None:
-            self.kl_types = [KL_TYPE.K_DAY]
-        elif isinstance(kl_types, KL_TYPE):
-            self.kl_types = [kl_types]
-        else:
-            self.kl_types = kl_types
 
         # 默认配置（MACD 默认启用）
         default_config = {
@@ -111,21 +96,10 @@ class ChanAnalyzer:
         self._chan: Optional[CChan] = None
         self._analysis: Optional[dict[str, Any]] = None
 
-    def _get_default_begin_date(self, kl_type: KL_TYPE) -> str:
-        """根据周期类型获取默认开始日期"""
+    def _get_default_begin_date(self) -> str:
+        """获取默认开始日期（近5年）"""
         now = datetime.now()
-        if kl_type == KL_TYPE.K_30M:
-            # 30分钟K线，默认获取近30天
-            return (now - timedelta(days=30)).strftime("%Y-%m-%d")
-        elif kl_type == KL_TYPE.K_DAY:
-            # 日线，默认获取近3年
-            return (now - timedelta(days=1095)).strftime("%Y-%m-%d")
-        elif kl_type == KL_TYPE.K_WEEK:
-            # 周线，默认获取近5年
-            return (now - timedelta(days=1825)).strftime("%Y-%m-%d")
-        else:
-            # 其他周期，默认获取近5年
-            return (now - timedelta(days=1825)).strftime("%Y-%m-%d")
+        return (now - timedelta(days=1825)).strftime("%Y-%m-%d")
 
     def _load_chan(self) -> CChan:
         """加载缠论分析数据"""
@@ -137,8 +111,8 @@ class ChanAnalyzer:
                 code=self.code,
                 begin_time=self.begin_date,
                 end_time=self.end_date,
-                data_src=DATA_SRC.TUSHARE,
-                lv_list=self.kl_types,
+                data_src=DATA_SRC.CACHE_DB,
+                lv_list=[KL_TYPE.K_DAY],
                 config=self.config,
                 autype=AUTYPE.QFQ,
             )
@@ -245,6 +219,9 @@ class ChanAnalyzer:
         # 成交量分析
         volume_analysis = self._analyze_volume(kl_data)
 
+        # K线高低点统计
+        kline_range = self._analyze_kline_range(kl_data)
+
         # 中枢位置判断
         zs_position = self._get_zs_position(last_klu.close, zs_list)
 
@@ -268,6 +245,7 @@ class ChanAnalyzer:
             "buy_signals": buy_signals,
             "sell_signals": sell_signals,
             "volume_analysis": volume_analysis,
+            "kline_range": kline_range,
             "zs_position": zs_position,
             "latest": {
                 "bi": latest_bi,
@@ -356,6 +334,55 @@ class ChanAnalyzer:
             "vol_price_rel": vol_price_rel,
         }
 
+    def _analyze_kline_range(self, kl_data, period: int = 20) -> dict[str, Any]:
+        """提取近期K线高低点统计
+
+        Args:
+            kl_data: K线数据
+            period: 统计周期（默认20根K线）
+        """
+        total = len(kl_data.lst)
+        if total == 0:
+            return {"status": "无K线数据"}
+
+        take = min(period, total)
+        recent = kl_data.lst[-take:]
+
+        highs = []
+        lows = []
+        closes = []
+        for klc in recent:
+            klu_high = max(klu.high for klu in klc.lst)
+            klu_low = min(klu.low for klu in klc.lst)
+            highs.append(klu_high)
+            lows.append(klu_low)
+            closes.append(klc.lst[-1].close)
+
+        period_high = max(highs)
+        period_low = min(lows)
+        current_price = closes[-1]
+
+        # 当前价格在区间内的位置百分比
+        range_width = period_high - period_low
+        if range_width > 0:
+            position_pct = (current_price - period_low) / range_width * 100
+        else:
+            position_pct = 50.0
+
+        # 距高低点的幅度
+        dist_high_pct = (current_price - period_high) / period_high * 100 if period_high > 0 else 0
+        dist_low_pct = (current_price - period_low) / period_low * 100 if period_low > 0 else 0
+
+        return {
+            "period": take,
+            "period_high": round(period_high, 2),
+            "period_low": round(period_low, 2),
+            "current_price": round(current_price, 2),
+            "position_pct": round(position_pct, 1),
+            "dist_high_pct": round(dist_high_pct, 2),
+            "dist_low_pct": round(dist_low_pct, 2),
+        }
+
     def _get_zs_position(self, price: float, zs_list: list) -> str:
         """判断价格相对中枢的位置"""
         if not zs_list:
@@ -374,147 +401,40 @@ class ChanAnalyzer:
         获取结构化分析结果
 
         Returns:
-            如果是单周期：返回单周期分析结果
-            如果是多周期：返回 {"multi": True, "levels": [周期1结果, 周期2结果, ...]}
+            日线分析结果字典
         """
         if self._analysis is not None:
             return self._analysis
 
         chan = self._load_chan()
 
-        if len(chan.lv_list) == 1:
-            # 单周期分析
-            self._analysis = self._analyze_single_level(chan, 0)
-            self._analysis["code"] = self.code
-            self._analysis["name"] = self.code
-            self._analysis["multi"] = False
-        else:
-            # 多周期分析
-            levels = []
-            day_level_idx = -1  # 记录日线级别的索引
-
-            for idx in range(len(chan.lv_list)):
-                level_data = self._analyze_single_level(chan, idx)
-                levels.append(level_data)
-                # 记录日线级别的索引（用于获取当前价格）
-                if chan.lv_list[idx] == KL_TYPE.K_DAY:
-                    day_level_idx = idx
-
-            self._analysis = {
-                "code": self.code,
-                "name": self.code,
-                "multi": True,
-                "levels": levels,
-            }
-
-            # 多周期分析时，使用日线级别的当前价格作为顶层价格
-            if day_level_idx >= 0 and day_level_idx < len(levels):
-                self._analysis["current_price"] = levels[day_level_idx].get("current_price", 0)
+        self._analysis = self._analyze_single_level(chan, 0)
+        self._analysis["code"] = self.code
+        self._analysis["name"] = self.code
 
         return self._analysis
 
-    def get_bs_points(self, level_idx: int = 0) -> list[dict[str, Any]]:
+    def get_bs_points(self) -> list[dict[str, Any]]:
         """
         获取买卖点列表
-
-        Args:
-            level_idx: 级别索引（0=第一个周期，如60分钟；1=第二个周期，如日线）
 
         Returns:
             买卖点列表
         """
         analysis = self.get_analysis()
-        if analysis.get("multi"):
-            if level_idx < len(analysis["levels"]):
-                return analysis["levels"][level_idx].get("buy_signals", []) + \
-                       analysis["levels"][level_idx].get("sell_signals", [])
-            return []
-        else:
-            return analysis.get("buy_signals", []) + analysis.get("sell_signals", [])
+        return analysis.get("buy_signals", []) + analysis.get("sell_signals", [])
 
     def get_summary(self) -> str:
         """
-        获取文本摘要（按改进意见格式）
+        获取文本摘要
 
         Returns:
             格式化的分析报告文本
         """
-        from ChanAnalyzer.formatter import format_summary, format_multi_summary
+        from ChanAnalyzer.formatter import format_summary
 
         analysis = self.get_analysis()
         if "error" in analysis:
             return f"分析失败: {analysis['error']}"
 
-        if analysis.get("multi"):
-            return format_multi_summary(analysis)
-        else:
-            return format_summary(analysis)
-
-
-class MultiChanAnalyzer:
-    """
-    多周期缠论分析器
-
-    同时分析 日线、周线 两个周期
-
-    示例:
-        >>> from ChanAnalyzer import MultiChanAnalyzer
-        >>> analyzer = MultiChanAnalyzer(code="000001")
-        >>> summary = analyzer.get_summary()
-        >>> print(summary)
-    """
-
-    # 多周期默认时间范围（基于最大周期周线）
-    DEFAULT_YEARS = 5  # 默认5年，适合周线分析
-
-    def __init__(
-        self,
-        code: str,
-        begin_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        token: Optional[str] = None,
-        config: Optional[dict[str, Any]] = None,
-    ):
-        """
-        初始化多周期分析器（日线、周线）
-
-        Args:
-            code: 股票代码
-            begin_date: 开始日期（默认为2年前，智能适配所有周期）
-            end_date: 结束日期
-            token: Tushare Token
-            config: 缠论配置
-        """
-        self.code = code
-        # 智能默认：根据最大周期（周线）设置合适的时间范围
-        if begin_date is None:
-            from datetime import datetime, timedelta
-            begin_date = (datetime.now() - timedelta(days=self.DEFAULT_YEARS * 365)).strftime("%Y-%m-%d")
-        self.begin_date = begin_date
-        self.end_date = end_date
-        self.token = token
-        self.config = config
-
-    def get_analysis(self) -> dict[str, Any]:
-        """获取多周期分析结果（周线 + 日线）"""
-        analyzer = ChanAnalyzer(
-            code=self.code,
-            begin_date=self.begin_date,
-            end_date=self.end_date,
-            token=self.token,
-            config=self.config,
-            kl_types=[KL_TYPE.K_WEEK, KL_TYPE.K_DAY],  # 从大到小
-        )
-        return analyzer.get_analysis()
-
-    def get_summary(self) -> str:
-        """获取多周期分析报告（周线 + 日线）"""
-        analyzer = ChanAnalyzer(
-            code=self.code,
-            begin_date=self.begin_date,
-            end_date=self.end_date,
-            token=self.token,
-            config=self.config,
-            kl_types=[KL_TYPE.K_WEEK, KL_TYPE.K_DAY],  # 从大到小
-        )
-        return analyzer.get_summary()
+        return format_summary(analysis)
