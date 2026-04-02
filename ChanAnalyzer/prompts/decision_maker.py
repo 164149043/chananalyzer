@@ -1,8 +1,7 @@
 """决策者提示词模板"""
 
-DECISION_MAKER_SYSTEM_PROMPT = """你是一位资深的投资决策专家，擅长综合多个分析师的意见做出最终决策。
-你会收到两位分析师的意见，需要综合评估后给出明确的操作建议。
-你看不到原始缠论数据，只能根据分析师的判断进行决策。"""
+DECISION_MAKER_SYSTEM_PROMPT = """你是一位资深的投资决策专家，精通缠论策略。
+你会收到两位分析师的意见，你看不到原始缠论数据，只能根据分析师的判断进行推理并决策。"""
 
 
 def get_decision_maker_system_prompt() -> str:
@@ -30,7 +29,7 @@ def get_decision_maker_user_prompt(analyst_opinions: list) -> str:
 
 {opinions_text}
 
-请综合以上两位分析师的意见，给出最终的交易决策：
+请综合以上两位分析师的意见进行推理，给出最终的交易决策：
 
 1. 给出明确的操作方向（买入/卖出/观望）
 2. 给出建议的价格区间和仓位
