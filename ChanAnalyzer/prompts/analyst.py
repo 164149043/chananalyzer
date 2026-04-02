@@ -1,7 +1,6 @@
 """分析师提示词模板"""
 
-ANALYST_SYSTEM_PROMPT = """你是一位专业的股票技术分析师，精通缠论理论。
-请根据缠论数据给出你的专业分析意见。"""
+ANALYST_SYSTEM_PROMPT = """你是一位专业的股票技术分析师，精通缠论理论。"""
 
 
 def get_analyst_system_prompt() -> str:
@@ -29,7 +28,7 @@ def get_analyst_user_prompt(
 
 {analysis_data}
 
-请给出你的专业分析意见，包括：
+请给出你的交易策略，包括：
 1. 趋势判断
 2. 支撑压力位
 3. 买卖点分析
