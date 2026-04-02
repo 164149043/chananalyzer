@@ -1,37 +1,30 @@
 """
 缠论分析结果格式化器
 
-按照改进意见的格式输出分析报告
+按固定格式输出日线分析报告
 """
 from typing import Any
 
 
-def format_summary(analysis: dict[str, Any], add_header: bool = True) -> str:
+def format_summary(analysis: dict[str, Any]) -> str:
     """
-    格式化单周期分析结果为文本摘要（按改进意见格式）
+    格式化日线分析结果为文本摘要
 
     Args:
         analysis: get_analysis() 返回的分析结果
-        add_header: 是否添加标题（多周期分析时设为False）
 
     Returns:
         格式化的文本摘要
     """
     lines = []
 
-    # 标题（仅在单周期分析时添加）
-    if add_header:
-        kl_type = analysis.get("kl_type", "")
-        if "60分钟" in kl_type:
-            kl_type_code = "H1"
-        elif "周线" in kl_type:
-            kl_type_code = "W1"
-        else:
-            kl_type_code = "D1"
-        lines.append("============================================================")
-        lines.append(f"## {analysis['code']} - {kl_type_code}")
-        lines.append("")
-        lines.append("")
+    # 标题
+    kl_type = analysis.get("kl_type", "")
+    kl_type_code = "D1"
+    lines.append("============================================================")
+    lines.append(f"## {analysis['code']} - {kl_type_code}")
+    lines.append("")
+    lines.append("")
 
     # 最新K线
     lines.append("### 最新K线")
@@ -107,13 +100,11 @@ def format_summary(analysis: dict[str, Any], add_header: bool = True) -> str:
     # 显示最近的买入信号
     if buy_signals:
         for bs in buy_signals[-3:]:
-            type_name = _format_bs_type(bs['type'])
             lines.append(f"- 买入信号: 类型={bs['type']}, 时间={bs['date']}, 价格={bs['price']:.2f}")
 
     # 显示最近的卖出信号
     if sell_signals:
         for bs in sell_signals[-3:]:
-            type_name = _format_bs_type(bs['type'])
             lines.append(f"- 卖出信号: 类型={bs['type']}, 时间={bs['date']}, 价格={bs['price']:.2f}")
 
     if not buy_signals and not sell_signals:
@@ -144,96 +135,6 @@ def format_summary(analysis: dict[str, Any], add_header: bool = True) -> str:
     lines.append("")
 
     return "\n".join(lines)
-
-
-def format_multi_summary(analysis: dict[str, Any]) -> str:
-    """
-    格式化多周期分析结果为文本摘要（按改进意见格式）
-
-    Args:
-        analysis: get_analysis() 返回的多周期分析结果
-
-    Returns:
-        格式化的多周期文本摘要
-    """
-    lines = []
-
-    for level_data in analysis['levels']:
-        kl_type = level_data.get("kl_type", "")
-        kl_type_code = "H1" if "60分钟" in kl_type else "D1" if "日线" in kl_type else "W1"
-        code = analysis['code']
-
-        lines.append("============================================================")
-        lines.append(f"## {code} - {kl_type_code}")
-        lines.append("")
-
-        if 'error' in level_data:
-            lines.append(f"错误: {level_data['error']}")
-            lines.append("")
-            lines.append("")
-            continue
-
-        # 使用单周期格式（不添加标题，因为已经在上面添加了）
-        level_analysis = {**level_data, "code": code}
-        lines.append(format_summary(level_analysis, add_header=False))
-
-    return "\n".join(lines)
-
-
-def _format_bs_type(type_str: str) -> str:
-    """格式化买卖点类型"""
-    type_map = {
-        "1": "1",
-        "1p": "1p",
-        "2": "2",
-        "2s": "2s",
-        "3a": "3a",
-        "3b": "3b",
-    }
-    return type_map.get(type_str.split(",")[0] if "," in type_str else type_str, type_str)
-
-
-def _generate_conclusion(analysis: dict[str, Any]) -> str:
-    """生成综合判断（保留兼容性）"""
-    current_price = analysis['current_price']
-    latest_bi = analysis['latest'].get('bi')
-    latest_seg = analysis['latest'].get('seg')
-    latest_zs = analysis['latest'].get('zs')
-    bs_points = analysis.get("buy_signals", []) + analysis.get("sell_signals", [])
-
-    conclusions = []
-
-    # 当前状态
-    if latest_bi:
-        bi_dir = latest_bi['dir']
-        conclusions.append(f"当前为{bi_dir}笔")
-
-    # 线段趋势
-    if latest_seg:
-        seg_dir = latest_seg['dir']
-        conclusions.append(f"处于{seg_dir}线段中")
-
-    # 中枢状态
-    zs_position = analysis.get("zs_position", "")
-    if "中枢上方" in zs_position:
-        conclusions.append("处于中枢上方强势区域")
-    elif "中枢下方" in zs_position:
-        conclusions.append("处于中枢下方弱势区域")
-    elif "中枢内部" in zs_position:
-        conclusions.append("处于中枢震荡区域")
-
-    # 买卖点判断
-    if bs_points:
-        latest_bs = bs_points[-1]
-        bs_type = _format_bs_type(latest_bs['type'])
-        bs_dir = "买入" if latest_bs['is_buy'] else "卖出"
-        conclusions.append(f"最近出现{bs_type}类{bs_dir}信号")
-
-    # 如果没有结论
-    if not conclusions:
-        return "数据不足，暂无法做出判断"
-
-    return "，".join(conclusions) + "。"
 
 
 def format_for_deepseek(analysis: dict[str, Any]) -> str:
