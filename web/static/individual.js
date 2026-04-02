@@ -315,7 +315,6 @@ async function startAnalysis() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 code: code,
-                multi: true,
                 temperatures: temperatures
             })
         });
