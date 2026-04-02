@@ -17,8 +17,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from Common.CEnum import KL_TYPE
-from ChanAnalyzer import ChanAnalyzer, MultiChanAnalyzer, MultiAIAnalyzer
+from ChanAnalyzer import ChanAnalyzer, MultiAIAnalyzer
 from ChanAnalyzer.sector_flow import get_stock_money_flow
 
 
@@ -47,19 +46,12 @@ def command_mode(args):
     print("-" * 60)
 
     try:
-        # 执行缠论分析
-        if args.multi:
-            analyzer = MultiChanAnalyzer(
-                code=code,
-                begin_date=args.begin_date,
-                end_date=args.end_date
-            )
-        else:
-            analyzer = ChanAnalyzer(
-                code=code,
-                begin_date=args.begin_date,
-                end_date=args.end_date,
-            )
+        # 执行缠论分析（日线）
+        analyzer = ChanAnalyzer(
+            code=code,
+            begin_date=args.begin_date,
+            end_date=args.end_date,
+        )
 
         analysis = analyzer.get_analysis()
 
@@ -147,7 +139,6 @@ def main():
     parser.add_argument('--code', help='股票代码')
     parser.add_argument('--begin-date', help='开始日期 (YYYY-MM-DD)')
     parser.add_argument('--end-date', help='结束日期 (YYYY-MM-DD)')
-    parser.add_argument('--multi', action='store_true', help='多周期分析')
     parser.add_argument('--no-money-flow', action='store_true', help='不获取资金流向')
     parser.add_argument('--config', help='配置文件路径 (默认: ai_config.yaml)')
     parser.add_argument('--output', help='保存分析结果到文件')
