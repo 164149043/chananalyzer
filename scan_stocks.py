@@ -20,7 +20,7 @@ except ImportError:
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ChanAnalyzer import ChanAnalyzer, MultiChanAnalyzer
+from ChanAnalyzer import ChanAnalyzer
 from ChanAnalyzer.stock_info import group_by_field
 from ChanAnalyzer.stock_pool import StockPool
 from ChanAnalyzer.sector_flow import print_sector_flow, get_stock_money_flow, filter_stocks_by_money_flow
@@ -113,7 +113,6 @@ def scan_stocks(
     stock_codes: List[str],
     buy_types: List[str] = None,
     sell_types: List[str] = None,
-    use_multi: bool = True,
     begin_date: str = None,
     verbose: bool = True,
     delay: float = 0,
@@ -128,7 +127,6 @@ def scan_stocks(
         stock_codes: 股票代码列表
         buy_types: 要筛选的买入类型，如 ['2', '3a', '3b']
         sell_types: 要筛选的卖出类型
-        use_multi: 是否使用多周期分析
         begin_date: 开始日期
         verbose: 是否打印进度
 
@@ -150,10 +148,7 @@ def scan_stocks(
 
     for i, code in iterator:
         try:
-            if use_multi:
-                analyzer = MultiChanAnalyzer(code=code, begin_date=begin_date)
-            else:
-                analyzer = ChanAnalyzer(code=code, begin_date=begin_date)
+            analyzer = ChanAnalyzer(code=code, begin_date=begin_date)
 
             analysis = analyzer.get_analysis()
 
@@ -164,7 +159,6 @@ def scan_stocks(
                 result = {
                     'code': code,
                     'signals': matched_signals,
-                    # 多周期分析时，analyzer 会使用日线级别的 current_price
                     'current_price': analysis.get('current_price', 0),
                 }
 
@@ -214,11 +208,7 @@ def check_signals(
     """检查分析结果中是否有匹配的买卖点"""
     matched = []
 
-    # 处理单周期或多周期结果
-    if analysis.get('multi'):
-        levels = analysis['levels']
-    else:
-        levels = [analysis]
+    levels = [analysis]
 
     for level in levels:
         kl_type = level.get('kl_type', '')
@@ -428,7 +418,6 @@ def main():
                        help='筛选买入类型 (默认: 2 3a 3b)')
     parser.add_argument('--sell', nargs='+', default=['2s', '3a', '3b'],
                        help='筛选卖出类型 (默认: 2s 3a 3b)')
-    parser.add_argument('--single', action='store_true', help='使用单周期分析')
     parser.add_argument('--begin', help='开始日期，如: 2024-01-01')
     parser.add_argument('--limit', type=int, help='限制扫描数量')
     parser.add_argument('--output', help='保存结果到文件')
@@ -510,7 +499,6 @@ def main():
         stock_codes=stock_codes,
         buy_types=args.buy,
         sell_types=args.sell,
-        use_multi=not args.single,
         begin_date=args.begin,
         delay=args.delay,
         show_money_flow=args.show_money_flow,
