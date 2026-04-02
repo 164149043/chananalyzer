@@ -176,6 +176,17 @@ class AIAnalyzer:
                 lines.append(f"- 状态: {', '.join(macd_status)}")
             lines.append("")
 
+        # K线高低点统计
+        kline_range = level.get('kline_range')
+        if kline_range and kline_range.get('status') != '无K线数据':
+            lines.append(f"**近{kline_range['period']}根K线统计**:")
+            lines.append(f"- 区间高点: {kline_range['period_high']:.2f}")
+            lines.append(f"- 区间低点: {kline_range['period_low']:.2f}")
+            lines.append(f"- 当前价格位置: {kline_range['position_pct']:.1f}% (0%=最低, 100%=最高)")
+            lines.append(f"- 距高点: {kline_range['dist_high_pct']:+.2f}%")
+            lines.append(f"- 距低点: {kline_range['dist_low_pct']:+.2f}%")
+            lines.append("")
+
         # 买卖点
         buy_signals = level.get('buy_signals', [])
         sell_signals = level.get('sell_signals', [])
@@ -187,8 +198,8 @@ class AIAnalyzer:
         # 最近买入点详情
         if buy_signals:
             lines.append("")
-            lines.append("**最近买入点**:")
-            for bs in buy_signals[-5:]:
+            lines.append(f"**买入点明细** (共{len(buy_signals)}个):")
+            for bs in buy_signals:
                 bs_type = bs.get('type', 'Unknown')
                 date = bs.get('date', '')
                 price = bs.get('price', 0)
@@ -197,8 +208,8 @@ class AIAnalyzer:
         # 最近卖出点详情
         if sell_signals:
             lines.append("")
-            lines.append("**最近卖出点**:")
-            for bs in sell_signals[-5:]:
+            lines.append(f"**卖出点明细** (共{len(sell_signals)}个):")
+            for bs in sell_signals:
                 bs_type = bs.get('type', 'Unknown')
                 date = bs.get('date', '')
                 price = bs.get('price', 0)
@@ -208,8 +219,8 @@ class AIAnalyzer:
         # 笔
         bi_list = level.get('bi_list', [])
         if bi_list:
-            lines.append("**笔列表** (最近5个):")
-            for bi in bi_list[-5:]:
+            lines.append(f"**笔列表** (最近20个，共{len(bi_list)}个):")
+            for bi in bi_list[-20:]:
                 direction = bi['dir']
                 start_date = bi['start_date']
                 end_date = bi['end_date']
@@ -228,8 +239,8 @@ class AIAnalyzer:
         # 线段
         seg_list = level.get('seg_list', [])
         if seg_list:
-            lines.append("**线段列表** (最近3个):")
-            for seg in seg_list[-3:]:
+            lines.append(f"**线段列表** (最近20个，共{len(seg_list)}个):")
+            for seg in seg_list[-20:]:
                 direction = seg['dir']
                 start_date = seg['start_date']
                 end_date = seg['end_date']
@@ -249,8 +260,9 @@ class AIAnalyzer:
         # 中枢
         zs_list = level.get('zs_list', [])
         if zs_list:
-            lines.append("**中枢列表**:")
-            for zs in zs_list:
+            show_zs = zs_list[-15:] if len(zs_list) > 15 else zs_list
+            lines.append(f"**中枢列表** (最近{len(show_zs)}个，共{len(zs_list)}个):")
+            for zs in show_zs:
                 zs_idx = zs['idx']
                 start_date = zs['start_date']
                 end_date = zs['end_date']
