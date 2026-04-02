@@ -109,49 +109,20 @@ class MultiAIAnalyzer:
         analysis_data: str,
         analyst_id: int
     ) -> tuple:
-        """创建分析师提示词"""
-        system_prompt = self.config['prompts']['analyst_system']
-        user_prompt = f"""你是对股票进行缠论分析的分析师{analyst_id + 1}。
-
-请分析以下缠论数据：
-
-{analysis_data}
-
-请给出你的专业分析意见，包括：
-1. 趋势判断
-2. 支撑压力位
-3. 买卖点分析
-4. 风险提示
-5. 操作建议（买入/卖出/观望）
-
-请简明扼要，重点突出。"""
-
+        """创建分析师提示词（使用 prompts 模块）"""
+        from ChanAnalyzer.prompts.analyst import get_analyst_system_prompt, get_analyst_user_prompt
+        system_prompt = get_analyst_system_prompt()
+        user_prompt = get_analyst_user_prompt(analysis_data, analyst_id + 1)
         return system_prompt, user_prompt
 
     def _create_decision_maker_prompt(
         self,
         analyst_opinions: List[AnalystOpinion]
     ) -> tuple:
-        """创建决策者提示词"""
-        system_prompt = self.config['prompts']['decision_maker_system']
-
-        opinions_text = "\n\n".join([
-            f"## {op.analyst_name} (温度: {op.temperature})\n"
-            f"分析:\n{op.opinion}"
-            for op in analyst_opinions
-        ])
-
-        user_prompt = f"""以下两位分析师对同一只股票的缠论分析意见：
-
-{opinions_text}
-
-请综合以上两位分析师的意见，给出最终的交易决策：
-
-1. 给出明确的操作方向（买入/卖出/观望）
-2. 给出建议的价格区间和仓位
-
-请简明扼要，**最终决策要明确**，不要模棱两可。"""
-
+        """创建决策者提示词（使用 prompts 模块）"""
+        from ChanAnalyzer.prompts.decision_maker import get_decision_maker_system_prompt, get_decision_maker_user_prompt
+        system_prompt = get_decision_maker_system_prompt()
+        user_prompt = get_decision_maker_user_prompt(analyst_opinions)
         return system_prompt, user_prompt
 
     def _call_analyst(
@@ -162,10 +133,15 @@ class MultiAIAnalyzer:
     ) -> AnalystOpinion:
         """调用单个分析师API"""
         config = self.config['analysts']
-        temperature = config['temperatures'][analyst_id]
+        models = config['models']
+        temperatures = config['temperatures']
+
+        # 按分析师ID选择对应的模型和温度
+        model = models[analyst_id] if analyst_id < len(models) else models[-1]
+        temperature = temperatures[analyst_id] if analyst_id < len(temperatures) else temperatures[-1]
 
         response = self.client.chat.completions.create(
-            model=config['model'],
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -177,7 +153,7 @@ class MultiAIAnalyzer:
         return AnalystOpinion(
             analyst_id=analyst_id,
             analyst_name=f"分析师{chr(65 + analyst_id)}",  # 分析师A, 分析师B
-            model=config['model'],
+            model=model,
             temperature=temperature,
             opinion=response.choices[0].message.content
         )
