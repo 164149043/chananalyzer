@@ -1,9 +1,0 @@
-{
-  "scanning": false,
-  "progress": 100,
-  "total": 100,
-  "found": 100,
-  "start_time": "2026-03-15T13:25:48.762294",
-  "message": "扫描完成，找到 100 只股票",
-  "last_scan_time": "2026-03-15T13:27:23.610765"
-}
