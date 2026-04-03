@@ -1809,6 +1809,9 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         except ImportError:
             system_prompt = '你是一位专业的股票技术分析师，精通缠论理论。'
 
+        # 获取分析师模型列表
+        models = ai_analyzer.config['analysts']['models']
+
         # 定义分析师任务
         def run_analyst(analyst_id, temperature):
             user_prompt = f"""你是对股票进行缠论分析的分析师{analyst_id + 1}。
@@ -1825,8 +1828,6 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
 5. 操作建议（买入/卖出/观望）
 
 请简明扼要，重点突出。"""
-
-            models = ai_analyzer.config['analysts']['models']
             response = ai_analyzer.client.chat.completions.create(
                 model=models[analyst_id] if analyst_id < len(models) else models[-1],
                 messages=[
