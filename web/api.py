@@ -1802,32 +1802,17 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         temp_b = temperatures.get('analyst_b', 0.7) if temperatures else 0.7
         temp_d = temperatures.get('decision_maker', 0.3) if temperatures else 0.3
 
-        # 创建系统提示（使用 prompts 模块）
-        try:
-            from ChanAnalyzer.prompts.analyst import get_analyst_system_prompt
-            system_prompt = get_analyst_system_prompt()
-        except ImportError:
-            system_prompt = '你是一位专业的股票技术分析师，精通缠论理论。'
+        # 加载提示词模块
+        from ChanAnalyzer.prompts.analyst import get_analyst_system_prompt, get_analyst_user_prompt
+        from ChanAnalyzer.prompts.decision_maker import get_decision_maker_system_prompt, get_decision_maker_user_prompt
 
         # 获取分析师模型列表
         models = ai_analyzer.config['analysts']['models']
 
         # 定义分析师任务
         def run_analyst(analyst_id, temperature):
-            user_prompt = f"""你是对股票进行缠论分析的分析师{analyst_id + 1}。
-
-请分析以下缠论数据：
-
-{analysis_data}
-
-请给出你的专业分析意见，包括：
-1. 趋势判断
-2. 支撑压力位
-3. 买卖点分析
-4. 风险提示
-5. 操作建议（买入/卖出/观望）
-
-请简明扼要，重点突出。"""
+            system_prompt = get_analyst_system_prompt()
+            user_prompt = get_analyst_user_prompt(analysis_data, analyst_id + 1)
             response = ai_analyzer.client.chat.completions.create(
                 model=models[analyst_id] if analyst_id < len(models) else models[-1],
                 messages=[
@@ -1899,28 +1884,18 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
 
         start_time = time.time()
 
-        opinions_text = "\n\n".join([
-            f"## {op['analyst_name']} (温度: {op['temperature']})\n分析:\n{op['opinion']}"
+        # 构造 AnalystOpinion 对象供决策者提示词使用
+        from types import SimpleNamespace
+        opinion_objects = [
+            SimpleNamespace(
+                analyst_name=op['analyst_name'],
+                temperature=op['temperature'],
+                opinion=op['opinion']
+            )
             for op in analyst_opinions
-        ])
-
-        decision_prompt = f"""以下两位分析师对同一只股票的缠论分析意见：
-
-{opinions_text}
-
-请综合以上两位分析师的意见，给出最终的交易决策：
-
-1. 给出明确的操作方向（买入/卖出/观望）
-2. 给出建议的价格区间和仓位
-
-请简明扼要，**最终决策要明确**，不要模棱两可。"""
-
-        # 决策者系统提示（使用 prompts 模块）
-        try:
-            from ChanAnalyzer.prompts.decision_maker import get_decision_maker_system_prompt
-            decision_system = get_decision_maker_system_prompt()
-        except ImportError:
-            decision_system = '你是一位资深的投资决策专家，擅长综合多个分析师的意见做出最终决策。'
+        ]
+        decision_system = get_decision_maker_system_prompt()
+        decision_prompt = get_decision_maker_user_prompt(opinion_objects)
 
         response = ai_analyzer.client.chat.completions.create(
             model=ai_analyzer.config['decision_maker']['model'],
