@@ -137,7 +137,7 @@ function startScanPolling() {
                 stopScanPolling();
             }
         }
-    }, 1000);
+    }, 3000);
 }
 
 function stopScanPolling() {
