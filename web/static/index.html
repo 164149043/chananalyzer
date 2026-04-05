@@ -2327,9 +2327,20 @@
         }
       } catch (error) {
         console.error('分析失败:', error);
-        document.getElementById('analystAOutput').textContent = `分析失败: ${error.message}`;
-        document.getElementById('analystBOutput').textContent = `分析失败: ${error.message}`;
-        document.getElementById('decisionOutput').textContent = '分析失败，请重试';
+        // 只更新还没有收到结果的区域，保留已收到的分析结果
+        const aOutput = document.getElementById('analystAOutput');
+        const bOutput = document.getElementById('analystBOutput');
+        const dOutput = document.getElementById('decisionOutput');
+
+        if (aOutput && aOutput.dataset.received !== 'true') {
+          aOutput.textContent = `分析失败: ${error.message}`;
+        }
+        if (bOutput && bOutput.dataset.received !== 'true') {
+          bOutput.textContent = `分析失败: ${error.message}`;
+        }
+        if (dOutput && dOutput.dataset.received !== 'true') {
+          dOutput.textContent = '分析中断，请重试';
+        }
       } finally {
         btn.disabled = false;
         btn.textContent = '开始分析';
@@ -2337,6 +2348,10 @@
         document.getElementById('analystBStatus').textContent = '';
         // 隐藏分析提示
         document.getElementById('analyzeTip').style.display = 'none';
+        // 清除 received 标记
+        document.getElementById('analystAOutput')?.removeAttribute('data-received');
+        document.getElementById('analystBOutput')?.removeAttribute('data-received');
+        document.getElementById('decisionOutput')?.removeAttribute('data-received');
       }
     });
 
@@ -2361,14 +2376,34 @@
       element.innerHTML = html;
     }
 
+    // 存储打字机定时器，用于中断
+    const typeWriterTimers = {
+      analystA: null,
+      analystB: null,
+      decision: null
+    };
+
+    // 完整文本存储（用于页面可见性变化时恢复显示）
+    const fullTexts = {
+      analystA: null,
+      analystB: null,
+      decision: null
+    };
+
     // 打字机效果函数
-    function typeWriter(element, text, speed = 20) {
+    function typeWriter(element, text, speed = 20, key = null) {
       element.textContent = '';
+
+      // 保存完整文本，用于页面可见性变化时恢复
+      if (key) {
+        fullTexts[key] = text;
+      }
 
       // 检查页面是否可见，如果不可见则直接输出并应用高亮
       if (document.hidden) {
         element.textContent = text;
         highlightText(element);
+        if (key) fullTexts[key] = null;
         return null;
       }
 
@@ -2379,6 +2414,10 @@
           clearInterval(timer);
           element.textContent = text;
           highlightText(element);
+          if (key) {
+            typeWriterTimers[key] = null;
+            fullTexts[key] = null;
+          }
           return;
         }
 
@@ -2387,6 +2426,10 @@
           index++;
         } else {
           clearInterval(timer);
+          if (key) {
+            typeWriterTimers[key] = null;
+            fullTexts[key] = null;
+          }
           // 打字完成后应用高亮
           highlightText(element);
         }
@@ -2395,35 +2438,32 @@
       return timer;
     }
 
-    // 存储打字机定时器，用于中断
-    const typeWriterTimers = {
-      analystA: null,
-      analystB: null,
-      decision: null
-    };
-
-    // 监听页面可见性变化，当页面变为可见时继续打字机效果
-    let pendingText = {
-      analystA: null,
-      analystB: null,
-      decision: null
-    };
-
+    // 监听页面可见性变化
     document.addEventListener('visibilitychange', () => {
+      const processPendingTypewriters = () => {
+        Object.keys(typeWriterTimers).forEach(key => {
+          if (typeWriterTimers[key] && fullTexts[key]) {
+            clearInterval(typeWriterTimers[key]);
+            typeWriterTimers[key] = null;
+
+            const elementId = key === 'analystA' ? 'analystAOutput'
+              : key === 'analystB' ? 'analystBOutput' : 'decisionOutput';
+            const el = document.getElementById(elementId);
+            if (el) {
+              el.textContent = fullTexts[key];
+              highlightText(el);
+            }
+            fullTexts[key] = null;
+          }
+        });
+      };
+
       if (document.hidden) {
-        // 页面隐藏时，保存待输出的文本
-        if (typeWriterTimers.analystA) {
-          clearInterval(typeWriterTimers.analystA);
-          pendingText.analystA = document.getElementById('analystAOutput')?.textContent || '';
-        }
-        if (typeWriterTimers.analystB) {
-          clearInterval(typeWriterTimers.analystB);
-          pendingText.analystB = document.getElementById('analystBOutput')?.textContent || '';
-        }
-        if (typeWriterTimers.decision) {
-          clearInterval(typeWriterTimers.decision);
-          pendingText.decision = document.getElementById('decisionOutput')?.textContent || '';
-        }
+        // 页面隐藏时，直接显示完整文本（避免后台标签页打字机被节流）
+        processPendingTypewriters();
+      } else {
+        // 页面恢复可见时，安全网：如果有残留的打字机效果，直接显示完整文本
+        processPendingTypewriters();
       }
     });
 
@@ -2450,9 +2490,10 @@
           }
 
           if (outputEl) {
-            // 使用打字机效果
+            // 使用打字机效果，传递 key 以支持页面可见性变化恢复
             outputEl.innerHTML = '';
-            typeWriterTimers[timerKey] = typeWriter(outputEl, opinion, 10);
+            outputEl.dataset.received = 'true';
+            typeWriterTimers[timerKey] = typeWriter(outputEl, opinion, 10, timerKey);
           }
           if (statusEl) {
             statusEl.className = 'analyst-status';
@@ -2473,7 +2514,8 @@
           const decisionOutput = document.getElementById('decisionOutput');
           if (decisionOutput && data.decision) {
             decisionOutput.innerHTML = '';
-            typeWriterTimers.decision = typeWriter(decisionOutput, data.decision, 10);
+            decisionOutput.dataset.received = 'true';
+            typeWriterTimers.decision = typeWriter(decisionOutput, data.decision, 10, 'decision');
           }
           break;
 
