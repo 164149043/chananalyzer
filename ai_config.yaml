@@ -7,16 +7,16 @@
 # ================================
 
 # ----- 方案1: DeepSeek（默认） -----
-provider:
-  name: deepseek
-  api_key_env: DEEPSEEK_API_KEY
-  base_url: https://api.deepseek.com
-
-# ----- 方案2: 硅基流动（取消下方注释，注释掉方案1） -----
 # provider:
-#   name: siliconflow
-#   api_key_env: SILICONFLOW_API_KEY
-#   base_url: https://api.siliconflow.cn/v1
+#   name: deepseek
+#   api_key_env: DEEPSEEK_API_KEY
+#   base_url: https://api.deepseek.com
+
+# ----- 方案2: 硅基流动（当前使用） -----
+provider:
+  name: siliconflow
+  api_key_env: SILICONFLOW_API_KEY
+  base_url: https://api.siliconflow.cn/v1
 
 # ================================
 # 分析师配置（每位分析师可独立配置模型和温度）
@@ -32,8 +32,8 @@ analysts:
   #                         Qwen/Qwen2.5-72B-Instruct
   #                         Pro/Qwen/Qwen2.5-72B-Instruct
   models:
-    - deepseek-chat    # 分析师A 模型
-    - deepseek-chat    # 分析师B 模型
+    - Qwen/Qwen3-32B    # 分析师A 模型
+    - ascend-tribe/pangu-pro-moe    # 分析师B 模型
 
   # 各分析师温度（不同温度获得多样化观点）
   temperatures: [0.4, 0.7]  # 分析师A偏保守，分析师B偏激进
@@ -49,7 +49,7 @@ decision_maker:
   # DeepSeek:          deepseek-reasoner
   # 硅基流动:           deepseek-ai/DeepSeek-R1
   #                    Pro/Qwen/Qwen2.5-72B-Instruct
-  model: deepseek-reasoner
+  model: Pro/deepseek-ai/DeepSeek-V3.2
 
   # 温度参数
   temperature: 0.3
