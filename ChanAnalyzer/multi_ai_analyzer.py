@@ -21,6 +21,7 @@ class AnalystOpinion:
     model: str
     temperature: float
     opinion: str
+    elapsed: float = 0.0  # 单个分析师耗时（秒）
 
 
 @dataclass
@@ -140,6 +141,8 @@ class MultiAIAnalyzer:
         model = models[analyst_id] if analyst_id < len(models) else models[-1]
         temperature = temperatures[analyst_id] if analyst_id < len(temperatures) else temperatures[-1]
 
+        import time
+        t0 = time.time()
         response = self.client.chat.completions.create(
             model=model,
             messages=[
@@ -149,13 +152,15 @@ class MultiAIAnalyzer:
             temperature=temperature,
             max_tokens=config['max_tokens'],
         )
+        elapsed = time.time() - t0
 
         return AnalystOpinion(
             analyst_id=analyst_id,
             analyst_name=f"分析师{chr(65 + analyst_id)}",  # 分析师A, 分析师B
             model=model,
             temperature=temperature,
-            opinion=response.choices[0].message.content
+            opinion=response.choices[0].message.content,
+            elapsed=elapsed,
         )
 
     def _call_decision_maker(
@@ -246,7 +251,7 @@ class MultiAIAnalyzer:
         # 分析师意见
         for opinion in result.analyst_opinions:
             print(f"\n【{opinion.analyst_name}】")
-            print(f"模型: {opinion.model} (温度: {opinion.temperature})")
+            print(f"模型: {opinion.model} (温度: {opinion.temperature}, 耗时: {opinion.elapsed:.2f}秒)")
             print("-" * 70)
             print(opinion.opinion)
 
