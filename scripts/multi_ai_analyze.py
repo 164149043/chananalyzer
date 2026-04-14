@@ -21,32 +21,57 @@ from ChanAnalyzer import ChanAnalyzer, MultiAIAnalyzer
 from ChanAnalyzer.sector_flow import get_stock_money_flow
 
 
-def check_api_key() -> bool:
-    """检查DeepSeek API密钥"""
-    if not os.environ.get("DEEPSEEK_API_KEY"):
-        print("\n错误: 未设置 DEEPSEEK_API_KEY 环境变量")
+def check_api_key(config_path: str = None) -> bool:
+    """根据配置文件检查对应的API密钥"""
+    import yaml
+
+    # 默认配置文件路径
+    if config_path is None:
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'ai_config.yaml'
+        )
+
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"\n错误: 配置文件不存在: {config_path}")
+        return False
+
+    provider = config.get('provider', {})
+    api_key_env = provider.get('api_key_env', 'DEEPSEEK_API_KEY')
+    provider_name = provider.get('name', 'deepseek')
+    base_url = provider.get('base_url', '')
+
+    if not os.environ.get(api_key_env):
+        print(f"\n错误: 未设置 {api_key_env} 环境变量")
         print("请先设置API密钥:")
-        print("  Windows PowerShell: $env:DEEPSEEK_API_KEY='your_key'")
-        print("  Linux/Mac: export DEEPSEEK_API_KEY='your_key'")
-        print("\n获取API密钥: https://platform.deepseek.com/api_keys")
+        print(f"  Windows PowerShell: $env:{api_key_env}='your_key'")
+        print(f"  Linux/Mac: export {api_key_env}='your_key'")
+        if base_url:
+            print(f"\n当前AI服务: {provider_name} ({base_url})")
         return False
     return True
 
 
 def command_mode(args):
     """命令行模式"""
-    if not check_api_key():
+    if not check_api_key(args.config):
         return
 
     code = args.code
     config_path = args.config
 
     print(f"\n正在分析: {code}")
-    print("AI服务: 多AI协作 (DeepSeek)")
+    print("AI服务: 多AI协作")
     print("-" * 60)
 
     try:
+        import time
+
         # 执行缠论分析（日线）
+        t0 = time.time()
         analyzer = ChanAnalyzer(
             code=code,
             begin_date=args.begin_date,
@@ -54,6 +79,8 @@ def command_mode(args):
         )
 
         analysis = analyzer.get_analysis()
+        t1 = time.time()
+        print(f"  缠论计算耗时: {t1-t0:.2f}秒")
 
         # 获取资金流向
         money_flow = None
@@ -68,9 +95,10 @@ def command_mode(args):
             except Exception as e:
                 print(f"资金流向获取失败: {e}")
 
+        t2 = time.time()
+
         # 多AI分析
         print("\n正在格式化缠论数据...")
-        print("=" * 60)
 
         ai = MultiAIAnalyzer(config_path=config_path)
 
@@ -81,6 +109,8 @@ def command_mode(args):
         print(analysis_data)
         print("=" * 60)
 
+        t3 = time.time()
+        print(f"  数据准备耗时: {t3-t2:.2f}秒")
         print("\n正在发送给AI分析...")
         print("-" * 60)
 
@@ -88,6 +118,14 @@ def command_mode(args):
 
         # 打印结果
         ai.print_result(result)
+
+        # 详细耗时汇总
+        print(f"\n--- 详细耗时 ---")
+        print(f"  缠论计算: {t1-t0:.2f}秒")
+        print(f"  数据准备: {t3-t2:.2f}秒")
+        print(f"  AI分析师(并行x2): {result.timing['analysts']:.2f}秒")
+        print(f"  AI决策者: {result.timing['decision_maker']:.2f}秒")
+        print(f"  总计: {t3-t0 + result.timing['total']:.2f}秒")
 
         # 保存到文件
         if args.output:
@@ -132,7 +170,7 @@ def main():
   python -m scripts.multi_ai_analyze --code 000001 --config my_config.yaml
 
 环境变量:
-  DEEPSEEK_API_KEY   DeepSeek API密钥 (获取: https://platform.deepseek.com/api_keys)
+  根据ai_config.yaml中provider.api_key_env配置对应的API密钥
         """
     )
 
