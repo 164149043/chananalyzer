@@ -123,7 +123,8 @@ def command_mode(args):
         print(f"\n--- 详细耗时 ---")
         print(f"  缠论计算: {t1-t0:.2f}秒")
         print(f"  数据准备: {t3-t2:.2f}秒")
-        print(f"  AI分析师(并行x2): {result.timing['analysts']:.2f}秒")
+        for opinion in result.analyst_opinions:
+            print(f"  {opinion.analyst_name} ({opinion.model}): {opinion.elapsed:.2f}秒")
         print(f"  AI决策者: {result.timing['decision_maker']:.2f}秒")
         print(f"  总计: {t3-t0 + result.timing['total']:.2f}秒")
 
