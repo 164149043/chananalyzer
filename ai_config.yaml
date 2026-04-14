@@ -32,14 +32,14 @@ analysts:
   #                         Qwen/Qwen2.5-72B-Instruct
   #                         Pro/Qwen/Qwen2.5-72B-Instruct
   models:
-    - Qwen/Qwen3-32B    # 分析师A 模型
-    - ascend-tribe/pangu-pro-moe    # 分析师B 模型
+    - Pro/MiniMaxAI/MiniMax-M2.5   # 分析师A 模型
+    - Pro/MiniMaxAI/MiniMax-M2.5     # 分析师B 模型
 
   # 各分析师温度（不同温度获得多样化观点）
   temperatures: [0.4, 0.7]  # 分析师A偏保守，分析师B偏激进
 
   # 最大输出token数
-  max_tokens: 2000
+  max_tokens: 1500
 
 # ================================
 # 决策者配置
@@ -49,13 +49,13 @@ decision_maker:
   # DeepSeek:          deepseek-reasoner
   # 硅基流动:           deepseek-ai/DeepSeek-R1
   #                    Pro/Qwen/Qwen2.5-72B-Instruct
-  model: Pro/deepseek-ai/DeepSeek-V3.2
+  model: Pro/deepseek-ai/DeepSeek-V3.
 
   # 温度参数
   temperature: 0.3
 
   # 最大输出token数
-  max_tokens: 2000
+  max_tokens: 1500
 
 # ================================
 # 提示词配置
