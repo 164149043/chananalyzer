@@ -49,7 +49,7 @@ decision_maker:
   # DeepSeek:          deepseek-reasoner
   # 硅基流动:           deepseek-ai/DeepSeek-R1
   #                    Pro/Qwen/Qwen2.5-72B-Instruct
-  model: Pro/deepseek-ai/DeepSeek-V3.
+  model: Pro/deepseek-ai/DeepSeek-V3.2
 
   # 温度参数
   temperature: 0.3
