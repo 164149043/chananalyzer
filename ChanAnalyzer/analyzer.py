@@ -81,11 +81,20 @@ class ChanAnalyzer:
         if token:
             os.environ["TUSHARE_TOKEN"] = token
 
-        # 默认配置（MACD 默认启用）
+        # 默认配置（与 scan_stocks_cache.py 保持一致）
         default_config = {
             "bi_strict": True,
+            "trigger_step": False,
+            "skip_step": 0,
+            "divergence_rate": float("inf"),
+            "bsp2_follow_1": False,
+            "bsp3_follow_1": False,
+            "min_zs_cnt": 0,
+            "bs1_peak": False,
+            "macd_algo": "peak",
             "bs_type": "1,1p,2,2s,3a,3b",
             "print_warning": False,
+            "zs_algo": "normal",
             "macd": {"fast": 12, "slow": 26, "signal": 9},
         }
         if config:
