@@ -201,14 +201,30 @@ function showAnalystLoading(analystId) {
 }
 
 /**
- * 完成分析师分析 - 使用打字机效果显示
+ * 追加分析师流式文字片段
  */
-function completeAnalyst(analystId, opinion) {
+function appendAnalystChunk(analystId, content) {
     const outputId = analystId === 0 ? 'analyst-a-output' : 'analyst-b-output';
-    const storageKey = analystId === 0 ? 'analystA' : 'analystB';
+    const el = document.getElementById(outputId);
+    if (el && content) {
+        el.removeAttribute('data-has-content');
+        // 如果还有 loading 提示，先清掉
+        if (el.querySelector('.loading')) {
+            el.innerHTML = '';
+        }
+        el.textContent += content;
+    }
+}
 
-    // 使用打字机效果显示分析结果（加快速度：10ms）
-    typewriterEffect(outputId, opinion, 10, storageKey);
+/**
+ * 完成分析师分析 - 应用高亮
+ */
+function completeAnalyst(analystId) {
+    const outputId = analystId === 0 ? 'analyst-a-output' : 'analyst-b-output';
+    const el = document.getElementById(outputId);
+    if (el) {
+        el.dataset.hasContent = 'true';
+    }
 }
 
 /**
@@ -229,11 +245,27 @@ function showDecisionLoading() {
 }
 
 /**
- * 完成决策 - 使用打字机效果显示
+ * 追加决策者流式文字片段
  */
-function completeDecision(decision) {
-    // 使用打字机效果显示决策结果（加快速度：10ms）
-    typewriterEffect('decision-output', decision, 10, 'decision');
+function appendDecisionChunk(content) {
+    const el = document.getElementById('decision-output');
+    if (el && content) {
+        // 如果还有 loading 提示，先清掉
+        if (el.querySelector('.loading')) {
+            el.innerHTML = '';
+        }
+        el.textContent += content;
+    }
+}
+
+/**
+ * 完成决策 - 应用高亮
+ */
+function completeDecision() {
+    const el = document.getElementById('decision-output');
+    if (el) {
+        el.dataset.hasContent = 'true';
+    }
 }
 
 /**
@@ -364,18 +396,26 @@ function handleSSEEvent(data) {
             showAnalystLoading(data.analyst_id);
             break;
 
+        case 'analyst_chunk':
+            // 流式接收分析师文字片段，直接追加显示
+            appendAnalystChunk(data.analyst_id, data.content);
+            break;
+
         case 'analyst_done':
-            // 分析完成，使用打字机效果显示结果
-            completeAnalyst(data.analyst_id, data.opinion);
+            completeAnalyst(data.analyst_id);
             break;
 
         case 'decision_start':
             showDecisionLoading();
             break;
 
+        case 'decision_chunk':
+            // 流式接收决策者文字片段，直接追加显示
+            appendDecisionChunk(data.content);
+            break;
+
         case 'decision_done':
-            // 决策完成，使用打字机效果显示结果
-            completeDecision(data.decision);
+            completeDecision();
             updateTiming(data.timing);
             setAnalyzingState(false);
             break;
