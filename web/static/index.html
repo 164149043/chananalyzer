@@ -2470,30 +2470,38 @@
     function handleSSEEvent(data) {
       switch (data.event) {
         case 'analyst_start':
-          // 分析师开始分析
+          // 分析师开始分析，清空输出区域准备接收流式文字
+          const startEl = data.analyst_id === 0
+            ? document.getElementById('analystAOutput')
+            : document.getElementById('analystBOutput');
+          if (startEl) {
+            startEl.innerHTML = '';
+          }
+          break;
+
+        case 'analyst_chunk':
+          // 流式接收分析师文字片段，直接追加显示
+          const chunkEl = data.analyst_id === 0
+            ? document.getElementById('analystAOutput')
+            : document.getElementById('analystBOutput');
+          if (chunkEl && data.content) {
+            chunkEl.textContent += data.content;
+          }
           break;
 
         case 'analyst_done':
           const analystId = data.analyst_id;
-          const opinion = data.opinion;
           const outputEl = analystId === 0
             ? document.getElementById('analystAOutput')
             : document.getElementById('analystBOutput');
           const statusEl = analystId === 0
             ? document.getElementById('analystAStatus')
             : document.getElementById('analystBStatus');
-          const timerKey = analystId === 0 ? 'analystA' : 'analystB';
-
-          // 清除之前的打字机定时器
-          if (typeWriterTimers[timerKey]) {
-            clearInterval(typeWriterTimers[timerKey]);
-          }
 
           if (outputEl) {
-            // 使用打字机效果，传递 key 以支持页面可见性变化恢复
-            outputEl.innerHTML = '';
+            // 流式已完成，应用高亮并标记
+            highlightText(outputEl);
             outputEl.dataset.received = 'true';
-            typeWriterTimers[timerKey] = typeWriter(outputEl, opinion, 10, timerKey);
           }
           if (statusEl) {
             statusEl.className = 'analyst-status';
@@ -2502,20 +2510,22 @@
           break;
 
         case 'decision_start':
-          document.getElementById('decisionOutput').innerHTML = '<div class="loading">综合决策中...</div>';
+          document.getElementById('decisionOutput').innerHTML = '';
+          break;
+
+        case 'decision_chunk':
+          // 流式接收决策者文字片段，直接追加显示
+          const decChunkEl = document.getElementById('decisionOutput');
+          if (decChunkEl && data.content) {
+            decChunkEl.textContent += data.content;
+          }
           break;
 
         case 'decision_done':
-          // 清除之前的打字机定时器
-          if (typeWriterTimers.decision) {
-            clearInterval(typeWriterTimers.decision);
-          }
-
           const decisionOutput = document.getElementById('decisionOutput');
-          if (decisionOutput && data.decision) {
-            decisionOutput.innerHTML = '';
+          if (decisionOutput) {
+            highlightText(decisionOutput);
             decisionOutput.dataset.received = 'true';
-            typeWriterTimers.decision = typeWriter(decisionOutput, data.decision, 10, 'decision');
           }
           break;
 
