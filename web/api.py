@@ -1740,26 +1740,11 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         code: 股票代码或名称（支持模糊匹配）
         temperatures: 温度配置 {analyst_a: 0.4, analyst_b: 0.7, decision_maker: 0.3}
 
-    输出流程（顺序执行，确保用户体验）：
-        1. 并行计算分析师A、B（结果缓存）
-        2. 推送分析师A结果 → 等待打字机效果
-        3. 推送分析师B结果 → 等待打字机效果
-        4. 调用决策者 → 推送决策结果
+    输出流程（流式实时推送）：
+        1. 并行流式调用分析师A、B，边生成边推送
+        2. 两个分析师都完成后，流式调用决策者，边生成边推送
     """
     import time
-
-    # 打字机效果配置
-    TYPEWRITER_SPEED_MS = 10  # 前端打字机速度（毫秒/字符）
-    MAX_DISPLAY_WAIT = 5.0    # 单个分析师最大等待时间（秒）
-    MIN_DISPLAY_WAIT = 1    # 最小等待时间（秒）
-
-    def calculate_display_time(text: str) -> float:
-        """根据文本长度计算打字机显示等待时间（秒）"""
-        char_count = len(text)
-        # 打字机显示时间 = 字符数 * 速度
-        display_time = char_count * TYPEWRITER_SPEED_MS / 1000
-        # 限制在合理范围内
-        return max(MIN_DISPLAY_WAIT, min(display_time, MAX_DISPLAY_WAIT))
 
     try:
         # 0. 解析股票代码/名称
@@ -1793,7 +1778,7 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         # 4. 格式化分析数据
         analysis_data = ai_analyzer.format_analysis_data(analysis, money_flow)
 
-        # 5. 阶段控制：并行计算 -> 顺序推送分析师 -> 决策者
+        # 5. 流式分析：并行流式推送分析师 → 流式推送决策者
         import time
         from concurrent.futures import ThreadPoolExecutor
 
@@ -1809,77 +1794,77 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         # 获取分析师模型列表
         models = ai_analyzer.config['analysts']['models']
 
-        # 定义分析师任务
-        def run_analyst(analyst_id, temperature):
-            system_prompt = get_analyst_system_prompt()
-            user_prompt = get_analyst_user_prompt(analysis_data, analyst_id + 1)
-            response = ai_analyzer.client.chat.completions.create(
-                model=models[analyst_id] if analyst_id < len(models) else models[-1],
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=temperature,
-                max_tokens=ai_analyzer.config['analysts']['max_tokens'],
-            )
+        # 使用 asyncio.Queue 在线程间传递流式 chunk
+        loop = asyncio.get_event_loop()
+        chunk_queue = asyncio.Queue()
 
-            return analyst_id, response.choices[0].message.content
+        # 存储完整的分析师意见（供决策者使用）
+        analyst_opinions = {0: "", 1: ""}
 
-        # ========== 阶段1：并行计算（不推送事件） ==========
+        def run_analyst_stream(analyst_id, temperature):
+            """流式调用分析师，将 chunk 放入队列"""
+            try:
+                system_prompt = get_analyst_system_prompt()
+                user_prompt = get_analyst_user_prompt(analysis_data, analyst_id + 1)
+                response = ai_analyzer.client.chat.completions.create(
+                    model=models[analyst_id] if analyst_id < len(models) else models[-1],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=temperature,
+                    max_tokens=ai_analyzer.config['analysts']['max_tokens'],
+                    stream=True,
+                )
+                for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        analyst_opinions[analyst_id] += content
+                        asyncio.run_coroutine_threadsafe(
+                            chunk_queue.put(('analyst_chunk', analyst_id, content)),
+                            loop
+                        )
+                # 发送完成信号
+                asyncio.run_coroutine_threadsafe(
+                    chunk_queue.put(('analyst_done', analyst_id, None)),
+                    loop
+                )
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(
+                    chunk_queue.put(('analyst_error', analyst_id, str(e))),
+                    loop
+                )
+
+        # ========== 阶段1：并行流式调用分析师A、B ==========
+        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 0, 'analyst_name': '分析师A'})}\n\n"
+        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 1, 'analyst_name': '分析师B'})}\n\n"
+
         start_time = time.time()
-        results = {}
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_a = executor.submit(run_analyst, 0, temp_a)
-            future_b = executor.submit(run_analyst, 1, temp_b)
+            executor.submit(run_analyst_stream, 0, temp_a)
+            executor.submit(run_analyst_stream, 1, temp_b)
 
-            # 等待两个分析师都完成（这里只计算，不发消息）
-            try:
-                results[0] = future_a.result()
-                results[1] = future_b.result()
-            except Exception as e:
-                print(f"分析师分析失败: {e}")
-                yield f"data: {json.dumps({'event': 'error', 'message': f'分析师分析失败: {str(e)}'})}\n\n"
-                return
+            # 从队列读取并实时推送
+            done_count = 0
+            while done_count < 2:
+                msg_type, analyst_id, content = await chunk_queue.get()
+
+                if msg_type == 'analyst_chunk':
+                    yield f"data: {json.dumps({'event': 'analyst_chunk', 'analyst_id': analyst_id, 'content': content})}\n\n"
+
+                elif msg_type == 'analyst_done':
+                    done_count += 1
+                    full_opinion = analyst_opinions[analyst_id]
+                    yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': analyst_id, 'opinion': full_opinion})}\n\n"
+
+                elif msg_type == 'analyst_error':
+                    done_count += 1
+                    yield f"data: {json.dumps({'event': 'error', 'message': f'分析师{analyst_id + 1}分析失败: {content}'})}\n\n"
 
         analyst_time = time.time() - start_time
 
-        # ========== 阶段2：按顺序推送分析师（先A后B），并等待打字机效果 ==========
-        analyst_opinions = []
-
-        # 发送分析师A开始和完成
-        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 0, 'analyst_name': '分析师A'})}\n\n"
-        a_id, a_opinion = results[0]
-        analyst_opinions.append({
-            'analyst_id': a_id,
-            'analyst_name': '分析师A',
-            'model': models[0] if len(models) > 0 else models[-1],
-            'temperature': temp_a,
-            'opinion': a_opinion
-        })
-        yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': 0, 'analyst_name': '分析师A', 'opinion': a_opinion})}\n\n"
-
-        # 等待分析师A的打字机效果完成
-        wait_time_a = calculate_display_time(a_opinion)
-        await asyncio.sleep(wait_time_a)
-
-        # 发送分析师B开始和完成
-        yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 1, 'analyst_name': '分析师B'})}\n\n"
-        b_id, b_opinion = results[1]
-        analyst_opinions.append({
-            'analyst_id': b_id,
-            'analyst_name': '分析师B',
-            'model': models[1] if len(models) > 1 else models[-1],
-            'temperature': temp_b,
-            'opinion': b_opinion
-        })
-        yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': 1, 'analyst_name': '分析师B', 'opinion': b_opinion})}\n\n"
-
-        # 等待分析师B的打字机效果完成
-        wait_time_b = calculate_display_time(b_opinion)
-        await asyncio.sleep(wait_time_b)
-
-        # 两个分析师都完成后，发送决策开始事件
+        # ========== 阶段2：流式调用决策者 ==========
         yield f"data: {json.dumps({'event': 'decision_start'})}\n\n"
 
         start_time = time.time()
@@ -1888,15 +1873,20 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         from types import SimpleNamespace
         opinion_objects = [
             SimpleNamespace(
-                analyst_name=op['analyst_name'],
-                temperature=op['temperature'],
-                opinion=op['opinion']
+                analyst_name='分析师A',
+                temperature=temp_a,
+                opinion=analyst_opinions[0]
+            ),
+            SimpleNamespace(
+                analyst_name='分析师B',
+                temperature=temp_b,
+                opinion=analyst_opinions[1]
             )
-            for op in analyst_opinions
         ]
         decision_system = get_decision_maker_system_prompt()
         decision_prompt = get_decision_maker_user_prompt(opinion_objects)
 
+        decision_full = ""
         response = ai_analyzer.client.chat.completions.create(
             model=ai_analyzer.config['decision_maker']['model'],
             messages=[
@@ -1905,19 +1895,25 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
             ],
             temperature=temp_d,
             max_tokens=ai_analyzer.config['decision_maker']['max_tokens'],
+            stream=True,
         )
 
-        decision = response.choices[0].message.content
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                decision_full += content
+                yield f"data: {json.dumps({'event': 'decision_chunk', 'content': content})}\n\n"
+
         decision_time = time.time() - start_time
 
-        # 7. 发送完成事件
+        # 发送完成事件
         timing = {
             'analysts': analyst_time,
             'decision_maker': decision_time,
             'total': analyst_time + decision_time
         }
 
-        yield f"data: {json.dumps({'event': 'decision_done', 'decision': decision, 'timing': timing})}\n\n"
+        yield f"data: {json.dumps({'event': 'decision_done', 'decision': decision_full, 'timing': timing})}\n\n"
         yield f"data: {json.dumps({'event': 'complete', 'status': 'done'})}\n\n"
 
     except Exception as e:
