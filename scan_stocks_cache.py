@@ -365,7 +365,7 @@ def analyze_stock(
     try:
         # 设置默认日期范围
         if begin_date is None:
-            begin_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            begin_date = (datetime.now() - timedelta(days=1825)).strftime("%Y-%m-%d")
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
