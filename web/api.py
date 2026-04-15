@@ -1738,7 +1738,7 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
 
     Args:
         code: 股票代码或名称（支持模糊匹配）
-        temperatures: 温度配置 {analyst_a: 0.4, analyst_b: 0.7, decision_maker: 0.3}
+        temperatures: 温度配置 {analyst_a: 0.3, analyst_b: 0.6, decision_maker: 0.3}
 
     输出流程（流式实时推送）：
         1. 并行流式调用分析师A、B，边生成边推送
@@ -1783,8 +1783,8 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         from concurrent.futures import ThreadPoolExecutor
 
         # 获取温度配置
-        temp_a = temperatures.get('analyst_a', 0.4) if temperatures else 0.4
-        temp_b = temperatures.get('analyst_b', 0.7) if temperatures else 0.7
+        temp_a = temperatures.get('analyst_a', 0.3) if temperatures else 0.3
+        temp_b = temperatures.get('analyst_b', 0.6) if temperatures else 0.6
         temp_d = temperatures.get('decision_maker', 0.3) if temperatures else 0.3
 
         # 加载提示词模块
@@ -1932,8 +1932,8 @@ async def analyze_stock(request: AnalyzeRequest):
     {
         "code": "000001",
         "temperatures": {
-            "analyst_a": 0.4,
-            "analyst_b": 0.7,
+            "analyst_a": 0.3,
+            "analyst_b": 0.6,
             "decision_maker": 0.3
         }
     }
