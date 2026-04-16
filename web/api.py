@@ -1771,12 +1771,20 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         except Exception as e:
             print(f"资金流向获取失败: {e}")
 
+        # 2.5 获取实时行情（仅交易时段）
+        realtime_quote = None
+        try:
+            from ChanAnalyzer.realtime_quote import get_realtime_quote
+            realtime_quote = get_realtime_quote(code)
+        except Exception as e:
+            print(f"实时行情获取失败: {e}")
+
         # 3. 创建多AI分析器
         MultiAIAnalyzer = import_multi_ai_analyzer()
         ai_analyzer = MultiAIAnalyzer()
 
         # 4. 格式化分析数据
-        analysis_data = ai_analyzer.format_analysis_data(analysis, money_flow)
+        analysis_data = ai_analyzer.format_analysis_data(analysis, money_flow, realtime_quote)
 
         # 5. 流式分析：并行流式推送分析师 → 流式推送决策者
         import time

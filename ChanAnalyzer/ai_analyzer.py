@@ -80,7 +80,8 @@ class AIAnalyzer:
     def format_analysis_data(
         self,
         analysis: Dict[str, Any],
-        money_flow: Optional[Dict[str, Any]] = None
+        money_flow: Optional[Dict[str, Any]] = None,
+        realtime_quote: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         将缠论分析数据格式化为AI可读的文本
@@ -88,6 +89,7 @@ class AIAnalyzer:
         Args:
             analysis: ChanAnalyzer.get_analysis() 返回的数据
             money_flow: 个股资金流向数据（可选）
+            realtime_quote: 盘中实时行情数据（可选）
 
         Returns:
             格式化的文本描述
@@ -97,6 +99,10 @@ class AIAnalyzer:
         # 基本信息
         code = analysis.get("code", "Unknown")
         lines.append(f"# 股票代码: {code}")
+
+        if realtime_quote and realtime_quote.get('is_trading'):
+            lines.append(f"> 盘中交易时段 · 实时行情已接入")
+
         lines.append("")
 
         if analysis.get("multi"):
@@ -111,7 +117,14 @@ class AIAnalyzer:
                     break
 
             if day_level:
-                lines.append(f"**当前价格（日线）**: {day_level.get('current_price', 0):.2f}")
+                close_price = day_level.get('current_price', 0)
+                if realtime_quote and realtime_quote.get('is_trading'):
+                    rt = realtime_quote
+                    lines.append(f"**最新收盘价**: {close_price:.2f}")
+                    lines.append(f"**盘中实时价**: {rt['price']:.2f} ({rt['change_pct']:+.2f}%) "
+                                 f"[昨收 {rt['prev_close']:.2f}，更新于 {rt['update_time']}]")
+                else:
+                    lines.append(f"**当前价格（日线收盘）**: {close_price:.2f}")
                 lines.append("")
 
             # 分别显示各周期分析
@@ -120,7 +133,7 @@ class AIAnalyzer:
                 lines.append("")
         else:
             # 单周期分析
-            lines.extend(self._format_level(analysis))
+            lines.extend(self._format_level(analysis, realtime_quote=realtime_quote))
             lines.append("")
 
         # 资金流向
@@ -130,7 +143,7 @@ class AIAnalyzer:
 
         return "\n".join(lines)
 
-    def _format_level(self, level: Dict[str, Any], level_num: int = 1, skip_current_price: bool = False) -> List[str]:
+    def _format_level(self, level: Dict[str, Any], level_num: int = 1, skip_current_price: bool = False, realtime_quote: Optional[Dict[str, Any]] = None) -> List[str]:
         """格式化单级别数据"""
         lines = []
 
@@ -144,7 +157,14 @@ class AIAnalyzer:
 
         # 当前价格（可选跳过，因为多周期时已在顶部显示日线价格）
         if not skip_current_price:
-            lines.append(f"**当前价格**: {level.get('current_price', 0):.2f}")
+            close_price = level.get('current_price', 0)
+            if realtime_quote and realtime_quote.get('is_trading'):
+                rt = realtime_quote
+                lines.append(f"**最新收盘价**: {close_price:.2f}")
+                lines.append(f"**盘中实时价**: {rt['price']:.2f} ({rt['change_pct']:+.2f}%) "
+                             f"[昨收 {rt['prev_close']:.2f}，更新于 {rt['update_time']}]")
+            else:
+                lines.append(f"**当前价格（日线收盘）**: {close_price:.2f}")
         lines.append("")
 
         # MACD

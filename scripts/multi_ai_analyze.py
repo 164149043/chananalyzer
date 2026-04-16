@@ -97,13 +97,26 @@ def command_mode(args):
 
         t2 = time.time()
 
+        # 获取实时行情
+        realtime_quote = None
+        print("正在获取盘中行情...")
+        try:
+            from ChanAnalyzer.realtime_quote import get_realtime_quote
+            realtime_quote = get_realtime_quote(code)
+            if realtime_quote:
+                print(f"盘中实时价: {realtime_quote['price']:.2f} ({realtime_quote['change_pct']:+.2f}%)")
+            else:
+                print("非交易时段，使用收盘价")
+        except Exception as e:
+            print(f"实时行情获取失败: {e}")
+
         # 多AI分析
         print("\n正在格式化缠论数据...")
 
         ai = MultiAIAnalyzer(config_path=config_path)
 
         # 打印发送给AI的原始缠论数据
-        analysis_data = ai.format_analysis_data(analysis, money_flow)
+        analysis_data = ai.format_analysis_data(analysis, money_flow, realtime_quote)
         print("\n【发送给AI的原始缠论数据】")
         print("=" * 60)
         print(analysis_data)
@@ -114,7 +127,7 @@ def command_mode(args):
         print("\n正在发送给AI分析...")
         print("-" * 60)
 
-        result = ai.analyze(analysis, money_flow)
+        result = ai.analyze(analysis, money_flow, realtime_quote)
 
         # 打印结果
         ai.print_result(result)

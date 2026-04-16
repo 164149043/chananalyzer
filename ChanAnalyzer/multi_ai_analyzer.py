@@ -94,7 +94,8 @@ class MultiAIAnalyzer:
     def format_analysis_data(
         self,
         analysis: Dict[str, Any],
-        money_flow: Optional[Dict[str, Any]] = None
+        money_flow: Optional[Dict[str, Any]] = None,
+        realtime_quote: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         将缠论分析数据格式化为AI可读的文本
@@ -103,7 +104,7 @@ class MultiAIAnalyzer:
         """
         from ChanAnalyzer.ai_analyzer import AIAnalyzer
         ai = AIAnalyzer(provider=self.config['provider']['name'])
-        return ai.format_analysis_data(analysis, money_flow)
+        return ai.format_analysis_data(analysis, money_flow, realtime_quote)
 
     def _create_analyst_prompt(
         self,
@@ -186,7 +187,8 @@ class MultiAIAnalyzer:
     def analyze(
         self,
         analysis: Dict[str, Any],
-        money_flow: Optional[Dict[str, Any]] = None
+        money_flow: Optional[Dict[str, Any]] = None,
+        realtime_quote: Optional[Dict[str, Any]] = None
     ) -> MultiAIResult:
         """
         执行多AI协作分析
@@ -194,6 +196,7 @@ class MultiAIAnalyzer:
         Args:
             analysis: ChanAnalyzer.get_analysis() 返回的数据
             money_flow: 个股资金流向数据（可选）
+            realtime_quote: 盘中实时行情数据（可选）
 
         Returns:
             MultiAIResult 包含分析师意见和最终决策
@@ -202,7 +205,7 @@ class MultiAIAnalyzer:
         timing = {}
 
         # 1. 格式化缠论数据
-        analysis_data = self.format_analysis_data(analysis, money_flow)
+        analysis_data = self.format_analysis_data(analysis, money_flow, realtime_quote)
 
         # 2. 并行调用分析师
         start_time = time.time()
