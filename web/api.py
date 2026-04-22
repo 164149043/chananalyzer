@@ -11,6 +11,7 @@ ChanAnalyzer FastAPI 后端服务 - 真实数据版
 """
 import os
 import sys
+import random
 
 import json
 import asyncio
@@ -383,8 +384,9 @@ async def background_scan_task(limit: int = 100, buy_types: List[str] = None):
         scan_status["message"] = "正在获取股票列表..."
         save_scan_status()
 
-        # 获取股票列表
-        stock_codes = get_stock_list_cached()[:limit]
+        # 获取股票列表（随机采样）
+        all_codes = get_stock_list_cached()
+        stock_codes = all_codes if limit <= 0 else random.sample(all_codes, min(limit, len(all_codes)))
         if not stock_codes:
             scan_status["scanning"] = False
             scan_status["message"] = "获取股票列表失败"
@@ -675,7 +677,10 @@ async def multi_user_buy_scan_task(
                 codes_to_scan = stock_codes
             else:
                 all_stock_codes = scan_stocks_cache.get_stock_list_from_db()
-                codes_to_scan = all_stock_codes if limit <= 0 else all_stock_codes[:limit]
+                if limit <= 0:
+                    codes_to_scan = all_stock_codes
+                else:
+                    codes_to_scan = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
         except FileNotFoundError as e:
             update_user_scan_status(user_id, 'buy',
                 scanning=False, error=f"数据库文件不存在: {str(e)}",
@@ -775,7 +780,10 @@ async def multi_user_sell_scan_task(
                 codes_to_scan = stock_codes
             else:
                 all_stock_codes = scan_stocks_cache.get_stock_list_from_db()
-                codes_to_scan = all_stock_codes if limit <= 0 else all_stock_codes[:limit]
+                if limit <= 0:
+                    codes_to_scan = all_stock_codes
+                else:
+                    codes_to_scan = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
         except FileNotFoundError as e:
             update_user_scan_status(user_id, 'sell',
                 scanning=False, error=f"数据库文件不存在: {str(e)}",
@@ -878,8 +886,11 @@ def background_buy_scan_task(types: List[str], limit: int):
         # 获取股票列表 - 添加详细错误处理
         try:
             all_stock_codes = scan_stocks_cache.get_stock_list_from_db()
-            # 当 limit <= 0 时表示扫描全市场，否则取前 limit 只
-            stock_codes = all_stock_codes if limit <= 0 else all_stock_codes[:limit]
+            # 当 limit <= 0 时表示扫描全市场，否则随机采样 limit 只
+            if limit <= 0:
+                stock_codes = all_stock_codes
+            else:
+                stock_codes = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
         except FileNotFoundError as e:
             buy_scan_status["scanning"] = False
             buy_scan_status["error"] = f"数据库文件不存在: {str(e)}"
@@ -992,8 +1003,11 @@ def background_sell_scan_task(types: List[str], limit: int):
         # 获取股票列表 - 添加详细错误处理
         try:
             all_stock_codes = scan_stocks_cache.get_stock_list_from_db()
-            # 当 limit <= 0 时表示扫描全市场，否则取前 limit 只
-            stock_codes = all_stock_codes if limit <= 0 else all_stock_codes[:limit]
+            # 当 limit <= 0 时表示扫描全市场，否则随机采样 limit 只
+            if limit <= 0:
+                stock_codes = all_stock_codes
+            else:
+                stock_codes = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
         except FileNotFoundError as e:
             sell_scan_status["scanning"] = False
             sell_scan_status["error"] = f"数据库文件不存在: {str(e)}"
@@ -1121,6 +1135,13 @@ class SellScanRequest(BaseModel):
     areas: Optional[List[str]] = None         # 地区筛选
     exclude_st: bool = True                   # 是否排除ST股票
     exclude_suspend: bool = True              # 是否排除停牌股票
+
+
+class HotScanRequest(BaseModel):
+    """热门股票扫描请求"""
+    types: List[str] = ["1", "2", "3a", "3b"]  # 买点类型
+    rank_type: str = "top_gainers"              # 排名类型
+    top_n: int = 100                           # 股票数量
 
 
 @app.post("/api/scan/start")
@@ -1290,7 +1311,129 @@ async def get_stock_list_api(limit: int = 100):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============ 筛选数据接口 ============
+@app.get("/api/stock/hot")
+async def get_hot_stocks_api(rank_type: str = 'top_gainers', top_n: int = 100):
+    """
+    获取热门股票
+
+    Args:
+        rank_type: 排名类型 (top_gainers/top_losers/top_volume/top_amount/top_turnover/dragon_tiger)
+        top_n: 返回前N只（默认100，最大100）
+    """
+    top_n = min(max(top_n, 1), 100)
+    try:
+        hot_mod = importlib.import_module('ChanAnalyzer.hot_stocks')
+        stocks = hot_mod.get_hot_stocks(rank_type=rank_type, top_n=top_n)
+        return {"stocks": stocks, "count": len(stocks)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scan/hot/start")
+async def start_hot_scan(
+    request: HotScanRequest,
+    user_id: str = Depends(get_current_user)
+):
+    """
+    启动热门股票扫描
+
+    先按排名类型获取热门股票，然后对这些股票执行买点扫描
+    """
+    user_status = get_user_scan_status(user_id, 'buy')
+    if user_status.get('scanning', False):
+        return {"message": "您有扫描任务正在进行中", "status": "running"}
+
+    if active_scans_semaphore.locked():
+        active_count = MAX_CONCURRENT_SCANS - active_scans_semaphore._value
+        return {"message": f"系统繁忙，当前有 {active_count}/{MAX_CONCURRENT_SCANS} 扫描任务正在运行", "status": "busy"}
+
+    asyncio.create_task(multi_user_hot_scan_task(
+        user_id, request.types, request.rank_type, request.top_n
+    ))
+
+    return {"message": "热门股票扫描任务已启动", "status": "started", "user_id": user_id}
+
+
+async def multi_user_hot_scan_task(
+    user_id: str,
+    types: List[str],
+    rank_type: str = 'top_gainers',
+    top_n: int = 100,
+):
+    """
+    多用户热门股票扫描任务
+
+    按排名类型获取热门股票，然后对这些股票执行扫描
+    """
+    loop = asyncio.get_event_loop()
+    pool = get_scan_process_pool()
+
+    try:
+        update_user_scan_status(user_id, 'buy',
+            scanning=True, error=None, progress=0,
+            start_time=datetime.now().isoformat(),
+            message="正在获取热门股票列表..."
+        )
+
+        # 获取热门股票
+        try:
+            hot_mod = importlib.import_module('ChanAnalyzer.hot_stocks')
+            hot_stocks = hot_mod.get_hot_stocks(rank_type=rank_type, top_n=max(top_n, 20))
+            codes_to_scan = [s['code'] for s in hot_stocks]
+        except Exception as e:
+            update_user_scan_status(user_id, 'buy',
+                scanning=False, error=f"获取热门股票失败: {str(e)}",
+                message=f"获取热门股票失败: {str(e)}"
+            )
+            return
+
+        if not codes_to_scan:
+            update_user_scan_status(user_id, 'buy',
+                scanning=False, error="未获取到热门股票",
+                message="未获取到热门股票"
+            )
+            return
+
+        update_user_scan_status(user_id, 'buy',
+            total=len(codes_to_scan),
+            message=f"开始扫描 {len(codes_to_scan)} 只热门股票..."
+        )
+
+        # 在进程池中执行扫描
+        result = await loop.run_in_executor(
+            pool,
+            _run_scan_in_process,
+            codes_to_scan, types, [], 'buy', user_id,
+            str(Path(__file__).parent / 'users'),
+            None, None, True, True
+        )
+
+        # 保存结果
+        if result['success']:
+            cache_file = get_user_cache_file(user_id, 'buy')
+            save_scan_results_cache(cache_file, result['stocks'])
+
+            update_user_scan_status(user_id, 'buy',
+                scanning=False,
+                progress=result['total'],
+                found=result['found'],
+                message=f"热门股票扫描完成，找到 {result['found']} 只股票有买点",
+                last_scan_time=datetime.now().isoformat()
+            )
+        else:
+            update_user_scan_status(user_id, 'buy',
+                scanning=False,
+                error=result.get('error', '未知错误'),
+                message=f"扫描失败: {result.get('error', '未知错误')}"
+            )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        update_user_scan_status(user_id, 'buy',
+            scanning=False, error=str(e),
+            message=f"扫描失败: {str(e)}"
+        )
 
 @app.get("/api/industries")
 async def get_industries():
@@ -1432,209 +1575,6 @@ async def get_stock_signals(code: str):
             "latest_sell": None,
             "error": str(e)
         }
-
-
-@app.get("/api/ranking")
-async def get_ranking(
-    rank_type: str = "change_pct",  # change_pct(涨跌幅), amount(成交额), turnover_rate(换手率)
-    top_n: int = 20,
-    realtime: bool = False  # 是否使用实时数据
-):
-    """获取每日排行榜数据（使用tushare API）
-
-    Args:
-        rank_type: 排行类型
-            - change_pct: 涨跌幅排行
-            - amount: 成交额排行
-            - turnover_rate: 换手率排行
-        top_n: 返回前N只股票
-        realtime: 是否使用实时数据（需要tushare积分>=2000）
-    """
-    try:
-        import os
-        import tushare as ts
-        from datetime import datetime
-
-        token = os.environ.get("TUSHARE_TOKEN")
-        if not token:
-            return {"stocks": [], "error": "未配置TUSHARE_TOKEN"}
-
-        # 直接使用 token 初始化，避免写入缓存文件导致权限问题
-        pro = ts.pro_api(token)
-
-        # 获取股票列表（用于实时数据）
-        stock_list = pro.stock_basic(exchange='', list_status='L', fields='ts_code,name')
-        if stock_list.empty:
-            return {"stocks": [], "error": "获取股票列表失败"}
-
-        # 过滤掉ST股票
-        stock_list = stock_list[~stock_list['name'].str.contains('ST|PT|退')]
-
-        if realtime:
-            # 使用实时数据
-            return await _get_realtime_ranking(pro, stock_list, rank_type, top_n)
-        else:
-            # 使用历史日线数据
-            return await _get_daily_ranking(pro, rank_type, top_n)
-
-    except Exception as e:
-        print(f"获取排行榜失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"stocks": [], "error": str(e)}
-
-
-async def _get_realtime_ranking(pro, stock_list, rank_type: str, top_n: int):
-    """获取实时排行榜数据（使用tushare realtime_list接口）"""
-    from datetime import datetime
-    import tushare as ts
-    import pandas as pd
-
-    try:
-        # 调用 tushare realtime_list 接口
-        # src='dc' 表示从数据中心获取
-        df_rt = ts.realtime_list(src='dc')
-
-        if df_rt is None or df_rt.empty:
-            return {"stocks": [], "error": "获取实时数据失败"}
-
-        # 根据排行类型排序
-        if rank_type == "change_pct":
-            df_rt = df_rt.sort_values('pct_change', ascending=False)
-            rank_name = "涨跌幅榜(实时)"
-        elif rank_type == "amount":
-            df_rt = df_rt.sort_values('amount', ascending=False)
-            rank_name = "成交额榜(实时)"
-        elif rank_type == "turnover_rate":
-            df_rt = df_rt.sort_values('turnover_rate', ascending=False)
-            rank_name = "换手率榜(实时)"
-        else:
-            return {"stocks": [], "error": "不支持的排行类型"}
-
-        # 取前N名
-        df_rt = df_rt.head(top_n)
-
-        # 过滤掉ST股票
-        df_rt = df_rt[~df_rt['name'].str.contains('ST|PT|退', na=False)]
-
-        # 构建返回数据
-        stocks = []
-        for _, row in df_rt.iterrows():
-            ts_code = row['ts_code']
-            code = ts_code.split('.')[0]
-            pct_change = row.get('pct_change', 0)
-
-            stocks.append({
-                "code": code,
-                "name": row.get('name', ''),
-                "close": row.get('price', 0),
-                "change_pct": pct_change / 100 if pd.notna(pct_change) else 0,
-                "turnover_rate": row.get('turnover_rate', 0),
-                "volume": row.get('volume', 0),
-                "amount": row.get('amount', 0)
-            })
-
-        now = datetime.now()
-        time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
-        return {
-            "rank_type": rank_type,
-            "rank_name": rank_name,
-            "date": time_str,
-            "realtime": True,
-            "stocks": stocks
-        }
-
-    except Exception as e:
-        print(f"获取实时排行榜失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"stocks": [], "error": f"获取实时数据失败: {str(e)}"}
-
-
-async def _get_daily_ranking(pro, rank_type: str, top_n: int):
-    """获取历史日线排行榜数据"""
-    from datetime import datetime
-    import pandas as pd
-
-    # 获取最新交易日
-    trade_cal = pro.trade_cal(exchange='SSE', start_date='20200101', end_date=datetime.now().strftime('%Y%m%d'))
-    trade_cal = trade_cal[trade_cal['is_open'] == 1]
-    if trade_cal.empty:
-        return {"stocks": [], "error": "无交易日数据"}
-
-    latest_date = trade_cal['cal_date'].max()
-
-    # 获取日线行情数据（包含涨跌幅和成交额）
-    df = pro.daily(trade_date=latest_date)
-
-    # 获取换手率数据
-    df_basic = pro.daily_basic(trade_date=latest_date, fields='ts_code,turnover_rate')
-
-    if df.empty:
-        return {"stocks": [], "error": "暂无数据"}
-
-    # 合并数据
-    if not df_basic.empty:
-        df = df.merge(df_basic, on='ts_code', how='left')
-
-    # 过滤掉ST股票和退市股票
-    df = df[~df['ts_code'].str.contains('ST|PT')]
-
-    # 根据排行类型排序
-    if rank_type == "change_pct":
-        # 涨跌幅榜（排除涨幅为0的）
-        df = df[df['pct_chg'] != 0].sort_values('pct_chg', ascending=False)
-        rank_name = "涨跌幅榜"
-    elif rank_type == "amount":
-        # 成交额榜
-        df = df.sort_values('amount', ascending=False)
-        rank_name = "成交额榜"
-    elif rank_type == "turnover_rate":
-        # 换手率榜
-        df = df.sort_values('turnover_rate', ascending=False)
-        rank_name = "换手率榜"
-    else:
-        return {"stocks": [], "error": "不支持的排行类型"}
-
-    # 取前N名
-    df = df.head(top_n)
-
-    # 获取股票名称
-    stock_names = {}
-    for ts_code in df['ts_code'].tolist():
-        code = ts_code.split('.')[0]
-        name = get_stock_name_by_code(code)
-        stock_names[ts_code] = name
-
-    # 构建返回数据
-    stocks = []
-    for _, row in df.iterrows():
-        ts_code = row['ts_code']
-        code = ts_code.split('.')[0]
-        pct_chg = row.get('pct_chg', 0)
-        turnover = row.get('turnover_rate')
-
-        stocks.append({
-            "code": code,
-            "name": stock_names.get(ts_code, ''),
-            "close": row['close'],
-            "change_pct": pct_chg / 100 if pd.notna(pct_chg) else 0,  # 转换为小数
-            "turnover_rate": turnover if pd.notna(turnover) else 0,
-            "volume": row['vol'],
-            "amount": row['amount']
-        })
-
-    # 格式化日期
-    date_str = f"{latest_date[:4]}-{latest_date[4:6]}-{latest_date[6:]}"
-
-    return {
-        "rank_type": rank_type,
-        "rank_name": rank_name,
-        "date": date_str,
-        "realtime": False,
-        "stocks": stocks
-    }
 
 
 def get_stock_name_by_code(code: str) -> str:
