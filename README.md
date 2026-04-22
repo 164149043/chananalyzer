@@ -50,7 +50,8 @@ Web 功能包括：
 - 📈 **个股分析** - 输入股票代码，多 AI 协作分析
 - ⚡ **买点扫描** - 一买、二买、三买批量扫描
 - 💰 **卖点扫描** - 二卖批量扫描
-- 📊 **智能筛选** - 行业/地区筛选 + 每日排行榜
+- 📊 **智能筛选** - 行业/地区筛选
+- 🔥 **热门扫描** - 涨幅/跌幅/成交额/成交量/换手率/龙虎榜
 
 ### 方式二：命令行
 
@@ -202,32 +203,33 @@ python -m scripts.multi_ai_analyze --code 000001 --output report.txt
 
 **多 AI 分析流程**：
 ```
-缠论数据 → [分析师A + 分析师B] 并行分析 → 决策者综合 → 最终建议
-           (deepseek-chat)                   (deepseek-reasoner)
-           温度: 0.4 / 0.7
+缠论数据 + 资金流向 + 盘中实时行情
+    → [分析师A + 分析师B] 并行分析 → 决策者综合 → 最终建议
 ```
 
 **配置文件** (`ai_config.yaml`)：
 
 ```yaml
+# AI服务提供商
+provider:
+  name: siliconflow                    # 支持 deepseek / siliconflow
+  api_key_env: SILICONFLOW_API_KEY
+  base_url: https://api.siliconflow.cn/v1
+
 # 分析师配置
 analysts:
-  model: deepseek-chat
-  temperatures: [0.4, 0.7]  # 两个分析师的温度
-  max_tokens: 2000
+  count: 2
+  models:
+    - Pro/deepseek-ai/DeepSeek-V3.2    # 分析师A
+    - Pro/deepseek-ai/DeepSeek-R1      # 分析师B
+  temperatures: [0.3, 0.6]             # A偏保守，B偏激进
+  max_tokens: 1500
 
 # 决策者配置
 decision_maker:
-  model: deepseek-reasoner
+  model: Pro/MiniMaxAI/MiniMax-M2.5
   temperature: 0.3
-  max_tokens: 2000
-
-# 提示词配置
-prompts:
-  analyst_system: |
-    你是一位专业的股票技术分析师，精通缠论理论...
-  decision_maker_system: |
-    你是一位资深的投资决策专家...
+  max_tokens: 1500
 ```
 
 ### Web 界面
@@ -257,7 +259,8 @@ python -m uvicorn web.api:app --host 0.0.0.0
 | 📈 个股分析 | AI 分析 | 双分析师 + 决策者模式，支持温度调节 |
 | ⚡ 买点扫描 | 批量扫描 | 一买、二买、三买 A/B |
 | 💰 卖点扫描 | 批量扫描 | 二卖（当前仅支持二卖） |
-| 📊 智能筛选 | 行业/地区筛选 | 按行业和地区筛选股票，支持每日排行榜 |
+| 📊 智能筛选 | 行业/地区筛选 | 按行业和地区筛选股票 |
+| 🔥 热门扫描 | 热门股票扫描 | 涨幅/跌幅/成交额/成交量/换手率/龙虎榜排名 |
 
 #### Web API 端点
 
@@ -280,7 +283,8 @@ GET  /api/stock/analysis/:code # 获取股票分析数据
 # 筛选和排行 API
 GET  /api/industries        # 获取行业列表及股票数量
 GET  /api/areas             # 获取地区列表及股票数量
-GET  /api/ranking           # 获取每日排行榜（涨跌幅/成交额/换手率）
+GET  /api/stock/hot         # 获取热门股票（涨幅/跌幅/成交额/成交量/换手率/龙虎榜）
+POST /api/scan/hot/start    # 启动热门股票扫描
 ```
 
 ### 数据缓存管理
@@ -322,11 +326,15 @@ python -m scripts.update_data --codes 000001 --refresh
 ## 项目结构
 
 ```
-chan.py/
+chananalyzer/
 ├── ChanAnalyzer/           # 分析模块
 │   ├── analyzer.py         # 核心分析器（仅日线）
 │   ├── ai_analyzer.py      # AI分析器
 │   ├── multi_ai_analyzer.py # 多AI协作分析器
+│   ├── stock_pool.py       # 股票池管理（筛选/随机采样）
+│   ├── hot_stocks.py       # 热门股票获取（涨幅/跌幅/成交额/成交量/换手率/龙虎榜）
+│   ├── realtime_quote.py   # 盘中实时行情
+│   ├── sector_flow.py      # 个股/板块资金流向
 │   ├── prompts/            # AI提示词模板
 │   │   ├── analyst.py      # 分析师提示词
 │   │   └── decision_maker.py # 决策者提示词
@@ -345,16 +353,14 @@ chan.py/
 │   └── CacheDBAPI.py      # 本地数据库接口
 ├── web/                    # Web界面
 │   ├── api.py             # FastAPI 后端
+│   ├── auth.py            # 用户认证
 │   ├── start_server.py    # 服务器启动脚本
 │   ├── static/            # 前端静态文件
-│   │   ├── index.html     # 主页面
-│   │   ├── app.js         # 仪表盘逻辑
-│   │   ├── individual.js  # 个股分析逻辑
-│   │   └── scan.js        # 扫描功能逻辑
+│   │   └── index.html     # 单页应用主页面
 │   └── cache/             # 扫描结果缓存
 ├── scripts/                # 脚本工具
-│   ├── ai_analyze.py      # AI分析脚本
 │   ├── multi_ai_analyze.py # 多AI协作分析脚本
+│   ├── ai_analyze.py      # 单AI分析脚本
 │   ├── cache_all_stocks.py # 批量缓存K线数据
 │   ├── cache_stock_info.py # 缓存股票基本信息
 │   └── update_data.py     # 数据更新脚本
@@ -490,6 +496,7 @@ for bs in bs_points:
 ```python
 from ChanAnalyzer import ChanAnalyzer, AIAnalyzer, MultiAIAnalyzer
 from ChanAnalyzer.sector_flow import get_stock_money_flow
+from ChanAnalyzer.realtime_quote import get_realtime_quote
 
 # 获取缠论数据
 analyzer = ChanAnalyzer(code="000001")
@@ -498,14 +505,17 @@ analysis = analyzer.get_analysis()
 # 获取资金流向
 money_flow = get_stock_money_flow("000001", days=5)
 
+# 获取盘中实时行情（非交易时段返回None）
+realtime_quote = get_realtime_quote("000001")
+
 # 单 AI 分析
 ai = AIAnalyzer(provider="deepseek")
-result = ai.analyze(analysis, money_flow=money_flow)
+result = ai.analyze(analysis, money_flow=money_flow, realtime_quote=realtime_quote)
 print(result)
 
 # 多 AI 协作分析（推荐）
 multi_ai = MultiAIAnalyzer()
-result = multi_ai.analyze(analysis, money_flow=money_flow)
+result = multi_ai.analyze(analysis, money_flow=money_flow, realtime_quote=realtime_quote)
 print(result.decision)
 
 # 查看分析师意见
@@ -520,8 +530,8 @@ for opinion in result.analyst_opinions:
 ### Q: 首次使用应该执行哪些命令？
 
 ```bash
-# 1. 设置 Token（只需一次）
-$env:TUSHARE_TOKEN="你的token"
+# 1. 配置 .env 文件（项目根目录）
+echo TUSHARE_TOKEN=你的token > .env
 
 # 2. 同步股票基本信息
 python -m scripts.cache_stock_info
@@ -542,6 +552,7 @@ python scan_stocks_cache.py --codes 000001 000002
 **A**:
 - K线数据：`./chan.db`
 - 股票信息：`~/.chan/cache/stock_info.json`
+- 实时行情：内存缓存（60秒过期），非交易时段不缓存
 
 ### Q: 如何更新所有股票数据？
 
@@ -588,19 +599,40 @@ python -m scripts.ai_analyze --code 000001
 python -m scripts.multi_ai_analyze --code 000001
 ```
 
-需要设置环境变量 `DEEPSEEK_API_KEY`，获取 API Key: https://platform.deepseek.com/api_keys
+需要设置对应的环境变量（如 `DEEPSEEK_API_KEY` 或 `SILICONFLOW_API_KEY`），具体查看 `ai_config.yaml` 配置。
 
 ### Q: 多 AI 协作分析有什么优势？
 
 **A**:
-- 两个分析师 AI 使用不同温度（0.4 / 0.7）并行分析，获得多样化观点
-- 决策者 AI（deepseek-reasoner 深度推理模型）综合分析师意见做出最终决策
+- 两个分析师 AI 使用不同温度并行分析，获得多样化观点
+- 盘中自动注入实时行情，盘后使用收盘价
+- 决策者 AI 综合分析师意见做出最终决策
 - 比单 AI 分析更全面、更可靠
 
+### Q: 买卖点扫描是随机还是顺序的？
+
+**A**: 扫描采用**随机采样**模式，每次扫描从全市场中随机选取指定数量的股票，避免每次都扫同一批股票。
+
+### Q: 热门扫描支持哪些类型？
+
+**A**: 支持6种热门股票排名：
+- 涨幅前100 / 跌幅前100 — 按当日涨跌幅排名
+- 成交额前100 / 成交量前100 — 按资金参与度排名
+- 换手率前100 — 按交易活跃度排名
+- 龙虎榜 — 当日上榜股票
+
 ---
-## 局域网启动命令： 
-python -m uvicorn web.api:app --host 0.0.0.0 
+
+### Q: 局域网如何访问？
+
+```bash
+python -m uvicorn web.api:app --host 0.0.0.0
+# 或
 python web/start_server.py --host 0.0.0.0
+```
+
+---
+
 ## 依赖项
 
 ### 核心依赖
