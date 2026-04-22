@@ -1194,114 +1194,6 @@
       padding: var(--space-xs) var(--space-sm);
     }
 
-    /* 排行榜样式 */
-    .ranking-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: var(--space-sm) 0;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .ranking-date {
-      font-size: 0.75rem;
-      color: var(--text-tertiary);
-    }
-
-    .ranking-list {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-xs);
-      max-height: 400px;
-      overflow-y: auto;
-    }
-
-    .ranking-item {
-      display: grid;
-      grid-template-columns: 30px 1fr 1fr 1fr 1fr;
-      gap: var(--space-sm);
-      align-items: center;
-      padding: var(--space-sm);
-      background: var(--bg-secondary);
-      border-radius: var(--radius-sm);
-      font-size: 0.8rem;
-      transition: background 0.2s;
-    }
-
-    .ranking-item:hover {
-      background: var(--bg-tertiary);
-    }
-
-    .ranking-rank {
-      font-weight: 600;
-      text-align: center;
-      color: var(--text-secondary);
-    }
-
-    .ranking-rank.rank-top-1 {
-      color: #ffd700;
-      font-size: 1rem;
-    }
-
-    .ranking-rank.rank-top-2 {
-      color: #c0c0c0;
-    }
-
-    .ranking-rank.rank-top-3 {
-      color: #cd7f32;
-    }
-
-    .ranking-code {
-      font-family: var(--font-mono);
-      color: var(--text-primary);
-    }
-
-    .ranking-name {
-      color: var(--text-secondary);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .ranking-price {
-      font-family: var(--font-mono);
-      text-align: right;
-      color: var(--text-primary);
-    }
-
-    .ranking-change {
-      font-family: var(--font-mono);
-      text-align: right;
-      font-weight: 500;
-    }
-
-    .text-up {
-      color: var(--zhu-red);
-    }
-
-    .text-down {
-      color: var(--fei-green);
-    }
-
-    /* 移动端适配 */
-    @media (max-width: 600px) {
-      .ranking-item {
-        grid-template-columns: 25px 1fr 1fr 1fr;
-        gap: var(--space-xs);
-        font-size: 0.75rem;
-      }
-
-      .ranking-price {
-        display: none;
-      }
-
-      .ranking-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    }
-
     #industryFilterGroup small {
       color: var(--text-tertiary);
       font-size: 0.7rem;
@@ -1359,8 +1251,8 @@
       <button class="nav-tab active" data-page="analysis">📈 个股分析</button>
       <button class="nav-tab" data-page="buy-scan">⚡ 买点扫描</button>
       <button class="nav-tab" data-page="sell-scan">💰 卖点扫描</button>
+      <button class="nav-tab" data-page="hot-scan">🔥 热门扫描</button>
       <button class="nav-tab" data-page="smart-filter">📊 智能筛选</button>
-      <button class="nav-tab" data-page="ranking">🏆 每日排行榜</button>
       <button class="nav-tab" data-page="theory">📚 缠论说明</button>
       <button class="nav-tab" data-page="settings">⚙️ 设置</button>
     </nav>
@@ -1467,9 +1359,9 @@
           <div class="input-group">
             <label class="input-label">扫描数量</label>
             <select class="select-field" id="buyLimit">
-              <option value="100">前 100 只</option>
-              <option value="500">前 500 只</option>
-              <option value="1000">前 1000 只</option>
+              <option value="100">随机 100 只</option>
+              <option value="500">随机 500 只</option>
+              <option value="1000">随机 1000 只</option>
               <option value="0">全市场</option>
             </select>
           </div>
@@ -1556,9 +1448,9 @@
           <div class="input-group">
             <label class="input-label">扫描数量</label>
             <select class="select-field" id="sellLimit">
-              <option value="100">前 100 只</option>
-              <option value="500">前 500 只</option>
-              <option value="1000">前 1000 只</option>
+              <option value="100">随机 100 只</option>
+              <option value="500">随机 500 只</option>
+              <option value="1000">随机 1000 只</option>
               <option value="0">全市场</option>
             </select>
           </div>
@@ -1612,6 +1504,100 @@
           <div class="empty-icon">📊</div>
           <div class="empty-text">暂无卖点数据</div>
           <div class="empty-hint">点击"开始扫描"查找卖点</div>
+        </div>
+      </div>
+
+      <!-- 热门股票扫描页面 -->
+      <div class="page" id="page-hot-scan">
+        <div class="card">
+          <div class="card-title">🔥 热门股票扫描</div>
+          <p style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 12px;">
+            获取当日涨跌幅排名前N的热门股票，自动扫描缠论买点信号
+          </p>
+
+          <div class="input-group">
+            <label class="input-label">买点类型</label>
+            <div class="checkbox-group" id="hotBuyTypesGroup">
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="1" checked> 一买
+              </label>
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="2" checked> 二买
+              </label>
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="3a" checked> 三买A
+              </label>
+              <label class="checkbox-item selected">
+                <input type="checkbox" value="3b" checked> 三买B
+              </label>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label class="input-label">热门类型</label>
+            <select class="select-field" id="hotRankType">
+              <option value="top_gainers">涨幅前 100</option>
+              <option value="top_losers">跌幅前 100</option>
+              <option value="top_amount">成交额前 100</option>
+              <option value="top_volume">成交量前 100</option>
+              <option value="top_turnover">换手率前 100</option>
+              <option value="dragon_tiger">龙虎榜</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary btn-full" id="hotScanBtn">
+            🔥 开始扫描
+          </button>
+        </div>
+
+        <!-- 热门股票列表预览 -->
+        <div class="card" id="hotStocksCard" style="display: none;">
+          <div class="card-title">📈 热门股票列表 <span id="hotStocksDate" style="font-size: 0.8em; color: var(--text-secondary);"></span></div>
+          <div id="hotStocksList" style="max-height: 300px; overflow-y: auto;"></div>
+        </div>
+
+        <!-- 扫描进度 -->
+        <div class="card" id="hotProgressCard" style="display: none;">
+          <div class="progress-bar">
+            <div class="progress-fill" id="hotProgressFill" style="width: 0%"></div>
+          </div>
+          <div class="progress-text">
+            <span id="hotProgressStatus">扫描中...</span>
+            <span id="hotProgressDetail">0/0</span>
+          </div>
+        </div>
+
+        <!-- 统计 -->
+        <div class="stats-row" id="hotStats" style="display: none;">
+          <div class="stat-card">
+            <div class="stat-label">找到</div>
+            <div class="stat-value" id="hotTotal">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">一买</div>
+            <div class="stat-value" id="hot1Count">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">二买</div>
+            <div class="stat-value" id="hot2Count">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">三买A</div>
+            <div class="stat-value" id="hot3aCount">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">三买B</div>
+            <div class="stat-value" id="hot3bCount">0</div>
+          </div>
+        </div>
+
+        <!-- 结果列表 -->
+        <div class="stock-list" id="hotResults"></div>
+
+        <div class="empty-state" id="hotEmpty">
+          <div class="empty-icon">🔥</div>
+          <div class="empty-text">暂无热门股票扫描数据</div>
+          <div class="empty-hint">点击"开始扫描"查找热门股票买点</div>
         </div>
       </div>
 
@@ -1783,38 +1769,6 @@
               <div class="empty-hint">选择行业、地区或输入股票代码</div>
             </div>
           </main>
-        </div>
-      </div>
-
-      <!-- 每日排行榜页面 -->
-      <div class="page" id="page-ranking">
-        <div class="card">
-          <div class="card-title">🏆 每日排行榜</div>
-
-          <div class="input-group">
-            <label class="input-label">排行类型</label>
-            <select class="select-field" id="rankingType">
-              <option value="change_pct">📈 涨跌幅榜</option>
-              <option value="amount">💰 成交额榜</option>
-              <option value="turnover_rate">📊 成交量榜</option>
-            </select>
-          </div>
-
-          <button class="btn btn-secondary btn-full" id="loadRankingBtn">
-            🏆 查看排行榜
-          </button>
-
-          <!-- 排行榜结果 -->
-          <div id="rankingResult" style="display: none;">
-            <div class="divider"></div>
-            <div class="ranking-header">
-              <span id="rankingTitle">涨跌幅榜</span>
-              <span class="ranking-date" id="rankingDate"></span>
-            </div>
-            <div class="ranking-list" id="rankingList">
-              <!-- 动态填充 -->
-            </div>
-          </div>
         </div>
       </div>
 
@@ -2170,6 +2124,8 @@
           loadBuyScanHistory();
         } else if (targetPage === 'sell-scan') {
           loadSellScanHistory();
+        } else if (targetPage === 'hot-scan') {
+          loadHotScanResults();
         } else if (targetPage === 'smart-filter') {
           // 智能筛选页面：确保用户已初始化并加载行业/地区列表
           await AuthManager.ensureUser();
@@ -2966,6 +2922,237 @@
       btn.innerHTML = '🔍 开始扫描';
     }
 
+    // ============ 热门股票扫描 ============
+
+    // 热门扫描状态
+    const hotScanState = { scanning: false, pollInterval: null };
+
+    // 复选框切换
+    document.querySelectorAll('#hotBuyTypesGroup .checkbox-item').forEach(label => {
+      label.addEventListener('click', function(e) {
+        if (e.target.tagName === 'INPUT') return;
+        const cb = this.querySelector('input');
+        cb.checked = !cb.checked;
+        this.classList.toggle('selected', cb.checked);
+      });
+      // 初始化选中状态
+      const cb = label.querySelector('input');
+      label.classList.toggle('selected', cb.checked);
+    });
+
+    // 启动热门扫描
+    document.getElementById('hotScanBtn')?.addEventListener('click', async () => {
+      if (hotScanState.scanning) return;
+
+      await AuthManager.ensureUser();
+
+      const checkboxes = document.querySelectorAll('#hotBuyTypesGroup input:checked');
+      const types = Array.from(checkboxes).map(cb => cb.value);
+      if (types.length === 0) {
+        alert('请至少选择一种买点类型');
+        return;
+      }
+
+      const rankType = document.getElementById('hotRankType').value;
+
+      // 更新UI
+      hotScanState.scanning = true;
+      const btn = document.getElementById('hotScanBtn');
+      btn.disabled = true;
+      btn.innerHTML = '⏳ 扫描中...';
+
+      document.getElementById('hotProgressCard').style.display = 'block';
+      document.getElementById('hotStats').style.display = 'flex';
+      document.getElementById('hotEmpty').style.display = 'none';
+      document.getElementById('hotResults').innerHTML = '';
+      document.getElementById('hotProgressStatus').textContent = '获取热门股票...';
+      document.getElementById('hotProgressDetail').textContent = '0';
+
+      // 先加载热门股票列表
+      try {
+        const hotResp = await fetch(`${API_BASE}/stock/hot?rank_type=${rankType}&top_n=100`);
+        if (hotResp.ok) {
+          const hotData = await hotResp.json();
+          renderHotStocksList(hotData.stocks || [], rankType);
+        }
+      } catch (e) {
+        console.error('获取热门列表失败:', e);
+      }
+
+      // 启动扫描
+      try {
+        const response = await AuthManager.fetch(`${API_BASE}/scan/hot/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ types, rank_type: rankType, top_n: 100 })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.detail || result.message || '启动扫描失败');
+        }
+        if (result.status === 'running') {
+          alert(result.message || '已有扫描任务正在进行中');
+          resetHotScanUI();
+          return;
+        }
+        if (result.status === 'busy') {
+          alert(result.message || '系统繁忙，请稍后再试');
+          resetHotScanUI();
+          return;
+        }
+
+        // 开始轮询（复用买点扫描的状态和结果接口）
+        pollHotScanStatus();
+      } catch (error) {
+        console.error('启动热门扫描失败:', error);
+        alert(`启动扫描失败: ${error.message}`);
+        resetHotScanUI();
+      }
+    });
+
+    // 轮询热门扫描状态（复用买点扫描状态接口）
+    function pollHotScanStatus() {
+      if (hotScanState.pollInterval) return;
+
+      hotScanState.pollInterval = PollingManager.add(setInterval(async () => {
+        try {
+          const response = await AuthManager.fetch(`${API_BASE}/scan/buy/status`);
+          if (!response.ok) return;
+
+          const status = await response.json();
+          updateHotScanProgress(status);
+
+          if (status.error) {
+            clearInterval(hotScanState.pollInterval);
+            hotScanState.pollInterval = null;
+            alert(`扫描失败: ${status.error}`);
+            resetHotScanUI();
+            return;
+          }
+
+          if (!status.scanning) {
+            clearInterval(hotScanState.pollInterval);
+            hotScanState.pollInterval = null;
+            await loadHotScanResults();
+            resetHotScanUI();
+          }
+        } catch (error) {
+          console.error('获取热门扫描状态失败:', error);
+        }
+      }, 3000));
+    }
+
+    // 更新热门扫描进度
+    function updateHotScanProgress(status) {
+      const progressFill = document.getElementById('hotProgressFill');
+      const progressStatus = document.getElementById('hotProgressStatus');
+      const progressDetail = document.getElementById('hotProgressDetail');
+
+      if (status.total > 0) {
+        const percent = Math.min(100, (status.progress / status.total * 100));
+        progressFill.style.width = `${percent}%`;
+        progressStatus.textContent = `扫描中 ${status.progress}/${status.total}`;
+      } else {
+        progressStatus.textContent = status.message || '准备中...';
+      }
+      progressDetail.textContent = `已找到 ${status.found} 只`;
+    }
+
+    // 加载热门扫描结果（复用买点结果接口）
+    async function loadHotScanResults() {
+      try {
+        const response = await AuthManager.fetch(`${API_BASE}/scan/buy/results`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const stocks = data.stocks || [];
+
+        renderStockResults('hot', stocks);
+        updateHotScanStats(stocks);
+      } catch (error) {
+        console.error('获取热门扫描结果失败:', error);
+      }
+    }
+
+    // 渲染热门股票列表
+    function renderHotStocksList(stocks, rankType) {
+      const container = document.getElementById('hotStocksList');
+      const card = document.getElementById('hotStocksCard');
+      card.style.display = 'block';
+
+      if (!stocks || stocks.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">暂无数据</p>';
+        return;
+      }
+
+      // 显示日期
+      if (stocks[0].trade_date) {
+        const d = stocks[0].trade_date;
+        document.getElementById('hotStocksDate').textContent = `(${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)})`;
+      }
+
+      // 根据排名类型选择右侧指标
+      function getIndicator(s) {
+        if (rankType === 'top_gainers' || rankType === 'top_losers') {
+          const pct = s.pct_chg || 0;
+          const cls = pct >= 0 ? 'color: var(--up-color)' : 'color: var(--down-color)';
+          return `<span style="${cls}; font-weight: 600;">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</span>`;
+        } else if (rankType === 'top_volume') {
+          const vol = s.vol || 0;
+          const txt = vol >= 10000 ? (vol / 10000).toFixed(1) + '万手' : vol.toFixed(0) + '手';
+          return `<span style="font-weight: 600;">${txt}</span>`;
+        } else if (rankType === 'top_amount') {
+          const amt = s.amount || 0;
+          const txt = amt >= 100000 ? (amt / 100000).toFixed(1) + '亿' : (amt / 10).toFixed(0) + '万';
+          return `<span style="font-weight: 600;">${txt}</span>`;
+        } else if (rankType === 'top_turnover') {
+          const rate = s.turnover_rate || 0;
+          return `<span style="font-weight: 600;">${rate.toFixed(2)}%</span>`;
+        } else if (rankType === 'dragon_tiger') {
+          const net = s.net_amount || 0;
+          const cls = net >= 0 ? 'color: var(--up-color)' : 'color: var(--down-color)';
+          return `<span style="${cls}; font-weight: 600;">净买入 ${(net / 10000).toFixed(0)}万</span>`;
+        }
+        return '';
+      }
+
+      container.innerHTML = stocks.map((s, i) => {
+        return `<div style="display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--border-color);">
+          <span style="font-size: 0.85em;"><b>${i + 1}.</b> ${s.code} ${s.name}</span>
+          ${getIndicator(s)}
+        </div>`;
+      }).join('');
+    }
+
+    // 更新热门扫描统计
+    function updateHotScanStats(stocks) {
+      const stats = { '1': 0, '2': 0, '3a': 0, '3b': 0 };
+
+      stocks.forEach(stock => {
+        stock.signals?.forEach(signal => {
+          if (signal.type in stats) {
+            stats[signal.type]++;
+          }
+        });
+      });
+
+      document.getElementById('hotTotal').textContent = stocks.length;
+      document.getElementById('hot1Count').textContent = stats['1'];
+      document.getElementById('hot2Count').textContent = stats['2'];
+      document.getElementById('hot3aCount').textContent = stats['3a'];
+      document.getElementById('hot3bCount').textContent = stats['3b'];
+    }
+
+    // 重置热门扫描UI
+    function resetHotScanUI() {
+      hotScanState.scanning = false;
+      const btn = document.getElementById('hotScanBtn');
+      btn.disabled = false;
+      btn.innerHTML = '🔥 开始扫描';
+    }
+
     // 加载历史数据
     async function loadBuyScanHistory() {
       try {
@@ -3177,66 +3364,6 @@
     document.getElementById('areaFilterGroup')?.addEventListener('change', (e) => {
       if (e.target.type === 'checkbox') {
         updateAreaCount();
-      }
-    });
-
-    // 加载排行榜
-    document.getElementById('loadRankingBtn')?.addEventListener('click', async () => {
-      const rankType = document.getElementById('rankingType').value;
-      const btn = document.getElementById('loadRankingBtn');
-      const resultDiv = document.getElementById('rankingResult');
-      const listDiv = document.getElementById('rankingList');
-
-      btn.disabled = true;
-      btn.innerHTML = '<span>⏳</span> 加载中...';
-
-      try {
-        const response = await fetch(`${API_BASE}/ranking?rank_type=${rankType}&top_n=20`);
-        const data = await response.json();
-
-        if (data.error) {
-          alert('获取排行榜失败: ' + data.error);
-          btn.disabled = false;
-          btn.innerHTML = '🏆 查看排行榜';
-          return;
-        }
-
-        // 更新标题和日期
-        const rankTitles = {
-          'change_pct': '📈 涨跌幅榜',
-          'amount': '💰 成交额榜',
-          'turnover_rate': '📊 成交量榜'
-        };
-        document.getElementById('rankingTitle').textContent = rankTitles[rankType] || '排行榜';
-        document.getElementById('rankingDate').textContent = data.date || '';
-
-        // 渲染排行榜列表
-        listDiv.innerHTML = data.stocks.map((stock, index) => {
-          const rankClass = index < 3 ? `rank-top-${index + 1}` : '';
-          const changePct = stock.change_pct !== null && stock.change_pct !== undefined
-            ? (stock.change_pct >= 0 ? '+' : '') + (stock.change_pct * 100).toFixed(2) + '%'
-            : '--';
-          const changeClass = stock.change_pct >= 0 ? 'text-up' : 'text-down';
-
-          return `
-            <div class="ranking-item" data-code="${stock.code}">
-              <span class="ranking-rank ${rankClass}">${index + 1}</span>
-              <span class="ranking-code">${stock.code}</span>
-              <span class="ranking-name">${stock.name}</span>
-              <span class="ranking-price">${stock.close ? stock.close.toFixed(2) : '--'}</span>
-              <span class="ranking-change ${changeClass}">${changePct}</span>
-            </div>
-          `;
-        }).join('');
-
-        resultDiv.style.display = 'block';
-
-      } catch (error) {
-        console.error('加载排行榜失败:', error);
-        alert('加载排行榜失败: ' + error.message);
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = '🏆 查看排行榜';
       }
     });
 
