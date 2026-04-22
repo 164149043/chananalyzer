@@ -219,6 +219,25 @@ class StockPool:
 
         return self._create_filtered_pool(codes)
 
+    def random_sample(self, n: int) -> 'StockPool':
+        """
+        随机采样指定数量的股票
+
+        Args:
+            n: 采样数量，n <= 0 时返回全部
+
+        Returns:
+            返回新的 StockPool 实例（链式调用）
+        """
+        import random
+
+        codes = self.get_stock_list()
+        if n <= 0 or n >= len(codes):
+            return self._create_filtered_pool(codes)
+
+        sampled = random.sample(codes, n)
+        return self._create_filtered_pool(sampled)
+
     def filter_by_custom(self, func: Callable[[Dict], bool]) -> 'StockPool':
         """
         自定义筛选器
