@@ -1536,11 +1536,11 @@
           <div class="input-group">
             <label class="input-label">热门类型</label>
             <select class="select-field" id="hotRankType">
-              <option value="top_gainers">涨幅前 100</option>
-              <option value="top_losers">跌幅前 100</option>
-              <option value="top_amount">成交额前 100</option>
-              <option value="top_volume">成交量前 100</option>
-              <option value="top_turnover">换手率前 100</option>
+              <option value="top_gainers">涨幅前 200</option>
+              <option value="top_losers">跌幅前 200</option>
+              <option value="top_amount">成交额前 200</option>
+              <option value="top_volume">成交量前 200</option>
+              <option value="top_turnover">换手率前 200</option>
               <option value="dragon_tiger">龙虎榜</option>
             </select>
           </div>
@@ -2970,7 +2970,7 @@
 
       // 先加载热门股票列表
       try {
-        const hotResp = await fetch(`${API_BASE}/stock/hot?rank_type=${rankType}&top_n=100`);
+        const hotResp = await fetch(`${API_BASE}/stock/hot?rank_type=${rankType}&top_n=200`);
         if (hotResp.ok) {
           const hotData = await hotResp.json();
           renderHotStocksList(hotData.stocks || [], rankType);
@@ -2984,7 +2984,7 @@
         const response = await AuthManager.fetch(`${API_BASE}/scan/hot/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ types, rank_type: rankType, top_n: 100 })
+          body: JSON.stringify({ types, rank_type: rankType, top_n: 200 })
         });
 
         const result = await response.json();
