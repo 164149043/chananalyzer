@@ -2485,6 +2485,14 @@
           }
           break;
 
+        case 'decision_error':
+          console.error('决策分析失败:', data.message);
+          const decisionErrOutput = document.getElementById('decisionOutput');
+          if (decisionErrOutput) {
+            decisionErrOutput.textContent = '决策分析失败: ' + data.message;
+          }
+          break;
+
         case 'complete':
           // 完成事件（不包含数据，只是状态标记）
           break;
