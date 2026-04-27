@@ -1141,7 +1141,7 @@ class HotScanRequest(BaseModel):
     """热门股票扫描请求"""
     types: List[str] = ["1", "2", "3a", "3b"]  # 买点类型
     rank_type: str = "top_gainers"              # 排名类型
-    top_n: int = 100                           # 股票数量
+    top_n: int = 200                           # 股票数量
 
 
 @app.post("/api/scan/start")
@@ -1312,15 +1312,15 @@ async def get_stock_list_api(limit: int = 100):
 
 
 @app.get("/api/stock/hot")
-async def get_hot_stocks_api(rank_type: str = 'top_gainers', top_n: int = 100):
+async def get_hot_stocks_api(rank_type: str = 'top_gainers', top_n: int = 200):
     """
     获取热门股票
 
     Args:
         rank_type: 排名类型 (top_gainers/top_losers/top_volume/top_amount/top_turnover/dragon_tiger)
-        top_n: 返回前N只（默认100，最大100）
+        top_n: 返回前N只（默认200，最大200）
     """
-    top_n = min(max(top_n, 1), 100)
+    top_n = min(max(top_n, 1), 200)
     try:
         hot_mod = importlib.import_module('ChanAnalyzer.hot_stocks')
         stocks = hot_mod.get_hot_stocks(rank_type=rank_type, top_n=top_n)
@@ -1358,7 +1358,7 @@ async def multi_user_hot_scan_task(
     user_id: str,
     types: List[str],
     rank_type: str = 'top_gainers',
-    top_n: int = 100,
+    top_n: int = 200,
 ):
     """
     多用户热门股票扫描任务
