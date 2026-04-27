@@ -19,7 +19,7 @@ RANK_TYPES = ['top_gainers', 'top_losers', 'top_volume', 'top_amount', 'top_turn
 
 def get_hot_stocks(
     rank_type: str = 'top_gainers',
-    top_n: int = 100,
+    top_n: int = 200,
     trade_date: str = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -27,7 +27,7 @@ def get_hot_stocks(
 
     Args:
         rank_type: 排名类型，见 RANK_TYPES
-        top_n: 返回数量（默认100）
+        top_n: 返回数量（默认200）
         trade_date: 交易日期 YYYYMMDD（默认最近交易日）
 
     Returns:
