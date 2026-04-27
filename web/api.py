@@ -1834,23 +1834,58 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         decision_system = get_decision_maker_system_prompt()
         decision_prompt = get_decision_maker_user_prompt(opinion_objects)
 
-        decision_full = ""
-        response = ai_analyzer.client.chat.completions.create(
-            model=ai_analyzer.config['decision_maker']['model'],
-            messages=[
-                {"role": "system", "content": decision_system},
-                {"role": "user", "content": decision_prompt}
-            ],
-            temperature=temp_d,
-            max_tokens=ai_analyzer.config['decision_maker']['max_tokens'],
-            stream=True,
-        )
+        # ========== 阶段2：流式调用决策者（用线程池避免阻塞事件循环） ==========
+        yield f"data: {json.dumps({'event': 'decision_start'})}\n\n"
 
-        for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
-                decision_full += content
-                yield f"data: {json.dumps({'event': 'decision_chunk', 'content': content})}\n\n"
+        decision_full = ""
+
+        def run_decision_stream():
+            """流式调用决策者，将 chunk 放入队列"""
+            try:
+                response = ai_analyzer.client.chat.completions.create(
+                    model=ai_analyzer.config['decision_maker']['model'],
+                    messages=[
+                        {"role": "system", "content": decision_system},
+                        {"role": "user", "content": decision_prompt}
+                    ],
+                    temperature=temp_d,
+                    max_tokens=ai_analyzer.config['decision_maker']['max_tokens'],
+                    stream=True,
+                )
+                for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        asyncio.run_coroutine_threadsafe(
+                            chunk_queue.put(('decision_chunk', None, content)),
+                            loop
+                        )
+                asyncio.run_coroutine_threadsafe(
+                    chunk_queue.put(('decision_done', None, None)),
+                    loop
+                )
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(
+                    chunk_queue.put(('decision_error', None, str(e))),
+                    loop
+                )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(run_decision_stream)
+
+            # 从队列读取并实时推送决策者内容
+            while True:
+                msg_type, _, content = await chunk_queue.get()
+
+                if msg_type == 'decision_chunk':
+                    decision_full += content
+                    yield f"data: {json.dumps({'event': 'decision_chunk', 'content': content})}\n\n"
+
+                elif msg_type == 'decision_done':
+                    break
+
+                elif msg_type == 'decision_error':
+                    yield f"data: {json.dumps({'event': 'error', 'message': content})}\n\n"
+                    break
 
         decision_time = time.time() - start_time
 
