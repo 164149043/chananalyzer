@@ -420,6 +420,11 @@ function handleSSEEvent(data) {
             setAnalyzingState(false);
             break;
 
+        case 'decision_error':
+            alert('决策分析失败: ' + data.message);
+            setAnalyzingState(false);
+            break;
+
         case 'error':
             alert('分析错误: ' + data.message);
             setAnalyzingState(false);
