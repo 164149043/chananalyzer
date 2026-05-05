@@ -1674,17 +1674,17 @@ class AnalyzeRequest(BaseModel):
 
 async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None):
     """
-    流式输出分析结果 (SSE)
+    流式输出分析结果 (SSE) - 纯异步实现
+
+    使用 AsyncOpenAI 异步客户端，彻底避免 ThreadPoolExecutor 阻塞事件循环的问题。
+    客户端断开后，后台任务会被自动取消，API 调用立即终止。
 
     Args:
         code: 股票代码或名称（支持模糊匹配）
         temperatures: 温度配置 {analyst_a: 0.3, analyst_b: 0.6, decision_maker: 0.3}
-
-    输出流程（流式实时推送）：
-        1. 并行流式调用分析师A、B，边生成边推送
-        2. 两个分析师都完成后，流式调用决策者，边生成边推送
     """
     import time
+    tasks: List[asyncio.Task] = []
 
     try:
         # 0. 解析股票代码/名称
@@ -1693,14 +1693,12 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
             yield f"data: {json.dumps({'event': 'error', 'message': f'未找到股票: {code}'})}\n\n"
             return
 
-        # 使用解析后的代码
         code = resolved_code
         stock_display_name = f"{resolved_name} ({code})" if resolved_name else code
 
         # 1. 获取缠论分析数据
         ChanAnalyzer = import_chan_analyzer()
         analyzer = ChanAnalyzer(code=code)
-
         analysis = analyzer.get_analysis()
 
         # 2. 获取资金流向
@@ -1726,10 +1724,6 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         # 4. 格式化分析数据
         analysis_data = ai_analyzer.format_analysis_data(analysis, money_flow, realtime_quote)
 
-        # 5. 流式分析：并行流式推送分析师 → 流式推送决策者
-        import time
-        from concurrent.futures import ThreadPoolExecutor
-
         # 获取温度配置
         temp_a = temperatures.get('analyst_a', 0.3) if temperatures else 0.3
         temp_b = temperatures.get('analyst_b', 0.6) if temperatures else 0.6
@@ -1742,19 +1736,16 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         # 获取分析师模型列表
         models = ai_analyzer.config['analysts']['models']
 
-        # 使用 asyncio.Queue 在线程间传递流式 chunk
-        loop = asyncio.get_event_loop()
+        # ========== 阶段1：并行流式调用分析师A、B ==========
         chunk_queue = asyncio.Queue()
-
-        # 存储完整的分析师意见（供决策者使用）
         analyst_opinions = {0: "", 1: ""}
 
-        def run_analyst_stream(analyst_id, temperature):
+        async def run_analyst_stream(analyst_id: int, temperature: float):
             """流式调用分析师，将 chunk 放入队列"""
             try:
                 system_prompt = get_analyst_system_prompt()
                 user_prompt = get_analyst_user_prompt(analysis_data, analyst_id + 1)
-                response = ai_analyzer.client.chat.completions.create(
+                response = await ai_analyzer.async_client.chat.completions.create(
                     model=models[analyst_id] if analyst_id < len(models) else models[-1],
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -1764,53 +1755,43 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
                     max_tokens=ai_analyzer.config['analysts']['max_tokens'],
                     stream=True,
                 )
-                for chunk in response:
+                async for chunk in response:
                     if chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         analyst_opinions[analyst_id] += content
-                        asyncio.run_coroutine_threadsafe(
-                            chunk_queue.put(('analyst_chunk', analyst_id, content)),
-                            loop
-                        )
-                # 发送完成信号
-                asyncio.run_coroutine_threadsafe(
-                    chunk_queue.put(('analyst_done', analyst_id, None)),
-                    loop
-                )
+                        await chunk_queue.put(('analyst_chunk', analyst_id, content))
+                await chunk_queue.put(('analyst_done', analyst_id, analyst_opinions[analyst_id]))
+            except asyncio.CancelledError:
+                raise  # 重新抛出，确保 asyncio 正确清理
             except Exception as e:
-                asyncio.run_coroutine_threadsafe(
-                    chunk_queue.put(('analyst_error', analyst_id, str(e))),
-                    loop
-                )
+                await chunk_queue.put(('analyst_error', analyst_id, str(e)))
 
-        # ========== 阶段1：并行流式调用分析师A、B ==========
         yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 0, 'analyst_name': '分析师A'})}\n\n"
         yield f"data: {json.dumps({'event': 'analyst_start', 'analyst_id': 1, 'analyst_name': '分析师B'})}\n\n"
 
         start_time = time.time()
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            executor.submit(run_analyst_stream, 0, temp_a)
-            executor.submit(run_analyst_stream, 1, temp_b)
+        task_a = asyncio.create_task(run_analyst_stream(0, temp_a))
+        task_b = asyncio.create_task(run_analyst_stream(1, temp_b))
+        tasks.extend([task_a, task_b])
 
-            # 从队列读取并实时推送
-            done_count = 0
-            while done_count < 2:
-                msg_type, analyst_id, content = await chunk_queue.get()
-
-                if msg_type == 'analyst_chunk':
-                    yield f"data: {json.dumps({'event': 'analyst_chunk', 'analyst_id': analyst_id, 'content': content})}\n\n"
-
-                elif msg_type == 'analyst_done':
-                    done_count += 1
-                    full_opinion = analyst_opinions[analyst_id]
-                    yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': analyst_id, 'opinion': full_opinion})}\n\n"
-
-                elif msg_type == 'analyst_error':
-                    done_count += 1
-                    yield f"data: {json.dumps({'event': 'error', 'message': f'分析师{analyst_id + 1}分析失败: {content}'})}\n\n"
+        done_count = 0
+        while done_count < 2:
+            msg_type, analyst_id, content = await chunk_queue.get()
+            if msg_type == 'analyst_chunk':
+                yield f"data: {json.dumps({'event': 'analyst_chunk', 'analyst_id': analyst_id, 'content': content})}\n\n"
+            elif msg_type == 'analyst_done':
+                done_count += 1
+                yield f"data: {json.dumps({'event': 'analyst_done', 'analyst_id': analyst_id, 'opinion': content})}\n\n"
+            elif msg_type == 'analyst_error':
+                done_count += 1
+                yield f"data: {json.dumps({'event': 'error', 'message': f'分析师{analyst_id + 1}分析失败: {content}'})}\n\n"
 
         analyst_time = time.time() - start_time
+
+        # 等待分析师任务完成（正常流程下已经完成）
+        await asyncio.gather(task_a, task_b, return_exceptions=True)
+        tasks.clear()
 
         # ========== 阶段2：流式调用决策者 ==========
         yield f"data: {json.dumps({'event': 'decision_start'})}\n\n"
@@ -1834,15 +1815,13 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         decision_system = get_decision_maker_system_prompt()
         decision_prompt = get_decision_maker_user_prompt(opinion_objects)
 
-        # ========== 阶段2：流式调用决策者（用线程池避免阻塞事件循环） ==========
-        yield f"data: {json.dumps({'event': 'decision_start'})}\n\n"
-
         decision_full = ""
+        chunk_queue = asyncio.Queue()  # 新队列，避免残留
 
-        def run_decision_stream():
+        async def run_decision_stream():
             """流式调用决策者，将 chunk 放入队列"""
             try:
-                response = ai_analyzer.client.chat.completions.create(
+                response = await ai_analyzer.async_client.chat.completions.create(
                     model=ai_analyzer.config['decision_maker']['model'],
                     messages=[
                         {"role": "system", "content": decision_system},
@@ -1852,44 +1831,32 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
                     max_tokens=ai_analyzer.config['decision_maker']['max_tokens'],
                     stream=True,
                 )
-                for chunk in response:
+                async for chunk in response:
                     if chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
-                        asyncio.run_coroutine_threadsafe(
-                            chunk_queue.put(('decision_chunk', None, content)),
-                            loop
-                        )
-                asyncio.run_coroutine_threadsafe(
-                    chunk_queue.put(('decision_done', None, None)),
-                    loop
-                )
+                        await chunk_queue.put(('decision_chunk', None, content))
+                await chunk_queue.put(('decision_done', None, None))
+            except asyncio.CancelledError:
+                raise  # 重新抛出，确保 asyncio 正确清理
             except Exception as e:
-                asyncio.run_coroutine_threadsafe(
-                    chunk_queue.put(('decision_error', None, str(e))),
-                    loop
-                )
+                await chunk_queue.put(('decision_error', None, str(e)))
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            executor.submit(run_decision_stream)
+        task_d = asyncio.create_task(run_decision_stream())
+        tasks.append(task_d)
 
-            # 从队列读取并实时推送决策者内容
-            while True:
-                msg_type, _, content = await chunk_queue.get()
-
-                if msg_type == 'decision_chunk':
-                    decision_full += content
-                    yield f"data: {json.dumps({'event': 'decision_chunk', 'content': content})}\n\n"
-
-                elif msg_type == 'decision_done':
-                    break
-
-                elif msg_type == 'decision_error':
-                    yield f"data: {json.dumps({'event': 'error', 'message': content})}\n\n"
-                    break
+        while True:
+            msg_type, _, content = await chunk_queue.get()
+            if msg_type == 'decision_chunk':
+                decision_full += content
+                yield f"data: {json.dumps({'event': 'decision_chunk', 'content': content})}\n\n"
+            elif msg_type == 'decision_done':
+                break
+            elif msg_type == 'decision_error':
+                yield f"data: {json.dumps({'event': 'error', 'message': content})}\n\n"
+                break
 
         decision_time = time.time() - start_time
 
-        # 发送完成事件
         timing = {
             'analysts': analyst_time,
             'decision_maker': decision_time,
@@ -1904,6 +1871,20 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         traceback.print_exc()
         yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
         yield f"data: {json.dumps({'event': 'complete', 'status': 'error'})}\n\n"
+
+    finally:
+        # 取消所有后台任务，防止客户端断开后 API 继续跑
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                pass
 
 
 @app.post("/api/stock/analyze")
