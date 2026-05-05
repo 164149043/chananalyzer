@@ -74,9 +74,9 @@ class MultiAIAnalyzer:
             return yaml.safe_load(f)
 
     def _init_client(self):
-        """初始化OpenAI客户端"""
+        """初始化OpenAI客户端（同步 + 异步）"""
         try:
-            from openai import OpenAI
+            from openai import OpenAI, AsyncOpenAI
         except ImportError:
             raise ImportError("请安装 openai 库: pip install openai")
 
@@ -87,6 +87,10 @@ class MultiAIAnalyzer:
             raise ValueError(f"请设置 {provider_config['api_key_env']} 环境变量")
 
         self.client = OpenAI(
+            api_key=api_key,
+            base_url=provider_config['base_url'],
+        )
+        self.async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=provider_config['base_url'],
         )
