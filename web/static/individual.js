@@ -323,11 +323,7 @@ async function startAnalysis() {
         return;
     }
 
-    // 验证股票代码格式
-    if (!/^\d{6}$/.test(code)) {
-        alert('股票代码格式不正确，请输入6位数字');
-        return;
-    }
+    // 股票代码或名称格式由后端 resolve_stock_code() 校验，前端仅做非空检查
 
     // 清空之前的结果
     clearOutputs();
@@ -403,6 +399,10 @@ function handleSSEEvent(data) {
 
         case 'analyst_done':
             completeAnalyst(data.analyst_id);
+            {
+                const el = document.getElementById(data.analyst_id === 0 ? 'analyst-a-output' : 'analyst-b-output');
+                if (el) applyHighlighting(el);
+            }
             break;
 
         case 'decision_start':
@@ -416,6 +416,10 @@ function handleSSEEvent(data) {
 
         case 'decision_done':
             completeDecision();
+            {
+                const el = document.getElementById('decision-output');
+                if (el) applyHighlighting(el);
+            }
             updateTiming(data.timing);
             setAnalyzingState(false);
             break;
