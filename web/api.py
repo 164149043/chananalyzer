@@ -523,8 +523,7 @@ def _run_scan_in_process(stock_codes: List[str], buy_types: List[str],
                          user_id: str, user_data_dir: str,
                          industries: List[str] = None,
                          areas: List[str] = None,
-                         exclude_st: bool = True,
-                         exclude_suspend: bool = True) -> Dict:
+                         exclude_st: bool = True) -> Dict:
     """
     在独立进程中执行的扫描函数
 
@@ -540,7 +539,6 @@ def _run_scan_in_process(stock_codes: List[str], buy_types: List[str],
         industries: 行业筛选列表
         areas: 地区筛选列表
         exclude_st: 是否排除ST股票
-        exclude_suspend: 是否排除停牌股票
 
     Returns:
         扫描结果字典
@@ -594,7 +592,6 @@ def _run_scan_in_process(stock_codes: List[str], buy_types: List[str],
             industries=industries,
             areas=areas,
             exclude_st=exclude_st,
-            exclude_suspend=exclude_suspend,
         )
 
         # 获取股票信息
@@ -642,7 +639,6 @@ async def multi_user_buy_scan_task(
     industries: List[str] = None,
     areas: List[str] = None,
     exclude_st: bool = True,
-    exclude_suspend: bool = True,
 ):
     """
     多用户买点扫描任务
@@ -657,7 +653,6 @@ async def multi_user_buy_scan_task(
         industries: 行业筛选（可选）
         areas: 地区筛选（可选）
         exclude_st: 是否排除ST股票
-        exclude_suspend: 是否排除停牌股票
     """
     loop = asyncio.get_event_loop()
     pool = get_scan_process_pool()
@@ -706,7 +701,7 @@ async def multi_user_buy_scan_task(
             _run_scan_in_process,
             codes_to_scan, types, [], 'buy', user_id,
             str(Path(__file__).parent / 'users'),
-            industries, areas, exclude_st, exclude_suspend
+            industries, areas, exclude_st
         )
 
         # 处理结果
@@ -747,7 +742,6 @@ async def multi_user_sell_scan_task(
     industries: List[str] = None,
     areas: List[str] = None,
     exclude_st: bool = True,
-    exclude_suspend: bool = True,
 ):
     """
     多用户卖点扫描任务
@@ -760,7 +754,6 @@ async def multi_user_sell_scan_task(
         industries: 行业筛选（可选）
         areas: 地区筛选（可选）
         exclude_st: 是否排除ST股票
-        exclude_suspend: 是否排除停牌股票
     """
     loop = asyncio.get_event_loop()
     pool = get_scan_process_pool()
@@ -809,7 +802,7 @@ async def multi_user_sell_scan_task(
             _run_scan_in_process,
             codes_to_scan, [], types, 'sell', user_id,
             str(Path(__file__).parent / 'users'),
-            industries, areas, exclude_st, exclude_suspend
+            industries, areas, exclude_st
         )
 
         # 处理结果
@@ -1122,7 +1115,6 @@ class BuyScanRequest(BaseModel):
     industries: Optional[List[str]] = None    # 行业筛选，如 ["电子", "计算机"]
     areas: Optional[List[str]] = None         # 地区筛选，如 ["深圳", "上海"]
     exclude_st: bool = True                   # 是否排除ST股票
-    exclude_suspend: bool = True              # 是否排除停牌股票
 
 
 class SellScanRequest(BaseModel):
@@ -1134,7 +1126,6 @@ class SellScanRequest(BaseModel):
     industries: Optional[List[str]] = None    # 行业筛选
     areas: Optional[List[str]] = None         # 地区筛选
     exclude_st: bool = True                   # 是否排除ST股票
-    exclude_suspend: bool = True              # 是否排除停牌股票
 
 
 class HotScanRequest(BaseModel):
@@ -1192,7 +1183,7 @@ async def start_buy_scan(
     asyncio.create_task(multi_user_buy_scan_task(
         user_id, request.types, request.limit,
         request.stock_codes, request.industries, request.areas,
-        request.exclude_st, request.exclude_suspend
+        request.exclude_st
     ))
 
     return {"message": "买点扫描任务已启动", "status": "started", "user_id": user_id}
@@ -1223,7 +1214,7 @@ async def start_sell_scan(
     asyncio.create_task(multi_user_sell_scan_task(
         user_id, request.types, request.limit,
         request.stock_codes, request.industries, request.areas,
-        request.exclude_st, request.exclude_suspend
+        request.exclude_st
     ))
 
     return {"message": "卖点扫描任务已启动", "status": "started", "user_id": user_id}
@@ -1405,7 +1396,7 @@ async def multi_user_hot_scan_task(
             _run_scan_in_process,
             codes_to_scan, types, [], 'buy', user_id,
             str(Path(__file__).parent / 'users'),
-            None, None, True, True
+            None, None, True
         )
 
         # 保存结果
@@ -1909,18 +1900,6 @@ async def analyze_stock(request: AnalyzeRequest):
         ),
         media_type="text/event-stream"
     )
-
-
-@app.get("/api/industries")
-async def get_industries():
-    """获取行业列表"""
-    try:
-        StockPool = import_stock_pool()
-        pool = StockPool()
-        industries = pool.get_industries()
-        return {"industries": industries}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
