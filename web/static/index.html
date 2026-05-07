@@ -2935,18 +2935,7 @@
     // 热门扫描状态
     const hotScanState = { scanning: false, pollInterval: null };
 
-    // 复选框切换
-    document.querySelectorAll('#hotBuyTypesGroup .checkbox-item').forEach(label => {
-      label.addEventListener('click', function(e) {
-        if (e.target.tagName === 'INPUT') return;
-        const cb = this.querySelector('input');
-        cb.checked = !cb.checked;
-        this.classList.toggle('selected', cb.checked);
-      });
-      // 初始化选中状态
-      const cb = label.querySelector('input');
-      label.classList.toggle('selected', cb.checked);
-    });
+    // 热门扫描复选框状态由全局 setupCheckbox 统一管理，此处无需重复绑定
 
     // 启动热门扫描
     document.getElementById('hotScanBtn')?.addEventListener('click', async () => {
