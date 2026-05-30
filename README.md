@@ -256,35 +256,56 @@ python -m uvicorn web.api:app --host 0.0.0.0
 | 模块 | 功能 | 说明 |
 |------|------|------|
 | 📊 仪表盘 | 市场概览 | 指数概览、买卖点统计、热门板块、买点推荐 |
-| 📈 个股分析 | AI 分析 | 双分析师 + 决策者模式，支持温度调节 |
-| ⚡ 买点扫描 | 批量扫描 | 一买、二买、三买 A/B |
-| 💰 卖点扫描 | 批量扫描 | 二卖（当前仅支持二卖） |
+| 📈 个股分析 | AI 分析 + K线图 | 双分析师 + 决策者模式，支持温度调节；K线图展示缠论标记 |
+| ⚡ 买点扫描 | 批量扫描 | 一买、一买衍生、二买、三买 A/B |
+| 💰 卖点扫描 | 批量扫描 | 一卖、二卖、三卖 A/B |
 | 📊 智能筛选 | 行业/地区筛选 | 按行业和地区筛选股票 |
 | 🔥 热门扫描 | 热门股票扫描 | 涨幅/跌幅/成交额/成交量/换手率/龙虎榜排名 |
+| 📚 缠论说明 | 理论学习 | 缠论核心概念、买卖点类型、操作原则 |
+
+#### K线图功能
+
+个股分析页面支持交互式K线图，基于 ECharts 渲染，展示以下缠论标记：
+
+| 标记 | 颜色 | 说明 |
+|------|------|------|
+| 笔 | 黄色实线/虚线 | 确认笔为实线，待定笔为虚线 |
+| 线段 | 蓝色粗线 | 确认线段为实线，待定线段为虚线 |
+| 中枢 | 橙色半透明区域 | 显示中枢区间和编号 |
+| 买卖点 | 红色三角(买)/绿色倒三角(卖) | 标记一二三类买卖点位置 |
+| 分型 | 紫色菱形 | 标记顶分型和底分型位置 |
+| 背离 | 红色虚线连接 | 检测顶背离和底背离 |
+| MACD | 副图指标 | DIF/DEA/MACD柱状图 |
+
+所有标记均可通过图表下方的切换按钮独立开关。支持鼠标滚轮缩放和拖拽浏览。
 
 #### Web API 端点
 
 ```bash
 # 买卖点扫描 API
-POST /api/scan/buy/start   # 启动买点扫描
-POST /api/scan/sell/start  # 启动卖点扫描
-GET  /api/scan/status      # 获取扫描状态
-GET  /api/scan/buy/results # 获取买点扫描结果
+POST /api/scan/buy/start    # 启动买点扫描
+POST /api/scan/sell/start   # 启动卖点扫描
+GET  /api/scan/buy/status   # 获取买点扫描状态
+GET  /api/scan/sell/status  # 获取卖点扫描状态
+GET  /api/scan/buy/results  # 获取买点扫描结果
 GET  /api/scan/sell/results # 获取卖点扫描结果
 
 # 个股分析 API
-POST /api/stock/analyze       # AI 分析股票（SSE 流式）
-GET  /api/ai/config        # 获取 AI 配置
-
-# 股票信息 API
-GET  /api/stock/info/:code # 获取股票信息
-GET  /api/stock/analysis/:code # 获取股票分析数据
+POST /api/stock/analyze        # AI 分析股票（SSE 流式）
+GET  /api/stock/{code}/kline   # 获取K线数据 + 缠论标记
+GET  /api/stock/{code}/signals # 获取买卖点信号摘要
+GET  /api/stock/list           # 获取股票列表
+GET  /api/stock/hot            # 获取热门股票
 
 # 筛选和排行 API
-GET  /api/industries        # 获取行业列表及股票数量
-GET  /api/areas             # 获取地区列表及股票数量
-GET  /api/stock/hot         # 获取热门股票（涨幅/跌幅/成交额/成交量/换手率/龙虎榜）
-POST /api/scan/hot/start    # 启动热门股票扫描
+GET  /api/industries         # 获取行业列表及股票数量
+GET  /api/areas              # 获取地区列表及股票数量
+POST /api/scan/hot/start     # 启动热门股票扫描
+
+# 用户认证 API
+GET  /api/auth/session       # 获取/创建用户会话
+POST /api/auth/refresh       # 刷新用户会话
+POST /api/auth/login         # 用户登录
 ```
 
 ### 数据缓存管理
@@ -356,7 +377,8 @@ chananalyzer/
 │   ├── auth.py            # 用户认证
 │   ├── start_server.py    # 服务器启动脚本
 │   ├── static/            # 前端静态文件
-│   │   └── index.html     # 单页应用主页面
+│   │   ├── index.html     # 单页应用主页面
+│   │   └── kline-chart.js # K线图渲染模块（ECharts缠论标记）
 │   └── cache/             # 扫描结果缓存
 ├── scripts/                # 脚本工具
 │   ├── multi_ai_analyze.py # 多AI协作分析脚本
@@ -411,7 +433,7 @@ chananalyzer/
 | 三买B | `3b` | 第三类买点B型 | 买入 |
 | 二卖 | `2s` | 第二类卖点 | 卖出 |
 
-> **注意**：当前版本仅支持 **二卖 (2s)** 作为卖点类型。一卖和三卖暂未实现。
+> **注意**：卖点类型 `2s` 表示类二卖点。一卖(`1`)、二卖(`2`)、三卖A(`3a`)、三卖B(`3b`) 均已支持。
 
 ### 常用行业名称
 
