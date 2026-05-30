@@ -385,6 +385,15 @@
       width: 100%;
     }
 
+    .btn-group {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn-group .btn {
+      flex: 1;
+    }
+
     .btn-secondary {
       background: var(--bg-secondary);
       color: var(--text-primary);
@@ -938,6 +947,28 @@
       background: white;
     }
 
+    /* === K线图控制按钮 === */
+    .kline-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 0 2px;
+      border-top: 1px solid var(--border-subtle);
+      margin-top: 8px;
+    }
+    .kline-toggle {
+      padding: 4px 14px;
+      font-size: 0.8rem;
+      border-radius: 4px;
+      opacity: 0.35;
+      color: #fff;
+      background: var(--c);
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .kline-toggle.active { opacity: 1; }
+
     /* === 响应式 === */
     @media (min-width: 768px) {
       .content-area {
@@ -1272,9 +1303,28 @@
           <div class="input-group">
             <input type="text" class="input-field" id="stockCode" placeholder="输入代码或名称，如 000001 或 平安银行" maxlength="20" value="000001">
           </div>
-          <button class="btn btn-primary btn-full" id="analyzeBtn">
-            开始分析
-          </button>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="klineBtn">📈 K线图表</button>
+            <button class="btn btn-primary" id="analyzeBtn">🤖 AI分析</button>
+          </div>
+        </div>
+
+        <!-- K线图区域 -->
+        <div class="card" id="klineCard" style="display: none; background: #fff; color: #333;">
+          <div class="card-title" style="display:flex;align-items:center;color:#333;">
+            <span>K线图 - 缠论分析</span>
+            <span id="klineDataDate" style="font-size:0.8em;color:var(--text-tertiary);margin-left:12px;"></span>
+          </div>
+          <div id="klineChart" style="width:100%;height:600px;"></div>
+          <div class="kline-controls">
+            <button class="kline-toggle active" data-toggle="bi" style="--c:#e6a817;">笔</button>
+            <button class="kline-toggle active" data-toggle="seg" style="--c:#3b82f6;">线段</button>
+            <button class="kline-toggle active" data-toggle="zs" style="--c:#ff8c00;">中枢</button>
+            <button class="kline-toggle active" data-toggle="bsp" style="--c:#c8372e;">买卖点</button>
+            <button class="kline-toggle active" data-toggle="fractal" style="--c:#9b59b6;">分型</button>
+            <button class="kline-toggle active" data-toggle="divergence" style="--c:#e74c3c;">背离</button>
+            <button class="kline-toggle active" data-toggle="macd" style="--c:#7f8c8d;">MACD</button>
+          </div>
         </div>
 
         <!-- 分析师区域 -->
@@ -1883,7 +1933,7 @@
           <div class="setting-item" style="display:none">
             <div>
               <div class="setting-label">多周期分析</div>
-              <div class="setting-desc">已移除，div>
+              <div class="setting-desc">已移除</div>
             </div>
             <div class="setting-control">
               <label class="toggle-switch">
@@ -2199,6 +2249,24 @@
     // ============================================
     let currentEventSource = null;
 
+    // K线图表按钮
+    document.getElementById('klineBtn')?.addEventListener('click', async () => {
+      const stockCode = document.getElementById('stockCode').value.trim();
+      if (!stockCode) {
+        alert('请输入股票代码或名称');
+        return;
+      }
+      const btn = document.getElementById('klineBtn');
+      btn.disabled = true;
+      btn.textContent = '加载中...';
+      try {
+        await loadAndRenderKline(stockCode);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📈 K线图表';
+      }
+    });
+
     document.getElementById('analyzeBtn')?.addEventListener('click', async () => {
       const stockCode = document.getElementById('stockCode').value.trim();
       if (!stockCode) {
@@ -2299,7 +2367,7 @@
         }
       } finally {
         btn.disabled = false;
-        btn.textContent = '开始分析';
+        btn.textContent = '🤖 AI分析';
         document.getElementById('analystAStatus').textContent = '';
         document.getElementById('analystBStatus').textContent = '';
         // 隐藏分析提示
@@ -3094,7 +3162,7 @@
       function getIndicator(s) {
         if (rankType === 'top_gainers' || rankType === 'top_losers') {
           const pct = s.pct_chg || 0;
-          const cls = pct >= 0 ? 'color: var(--up-color)' : 'color: var(--down-color)';
+          const cls = pct >= 0 ? 'color: var(--zhu-red)' : 'color: var(--fei-green)';
           return `<span style="${cls}; font-weight: 600;">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</span>`;
         } else if (rankType === 'top_volume') {
           const vol = s.vol || 0;
@@ -3109,7 +3177,7 @@
           return `<span style="font-weight: 600;">${rate.toFixed(2)}%</span>`;
         } else if (rankType === 'dragon_tiger') {
           const net = s.net_amount || 0;
-          const cls = net >= 0 ? 'color: var(--up-color)' : 'color: var(--down-color)';
+          const cls = net >= 0 ? 'color: var(--zhu-red)' : 'color: var(--fei-green)';
           return `<span style="${cls}; font-weight: 600;">净买入 ${(net / 10000).toFixed(0)}万</span>`;
         }
         return '';
@@ -3153,7 +3221,7 @@
     // 加载历史数据
     async function loadBuyScanHistory() {
       try {
-        const response = await fetch(`${API_BASE}/scan/buy/results`);
+        const response = await AuthManager.fetch(`${API_BASE}/scan/buy/results`);
         if (response.ok) {
           const data = await response.json();
           if (data.stocks && data.stocks.length > 0) {
@@ -3170,7 +3238,7 @@
 
     async function loadSellScanHistory() {
       try {
-        const response = await fetch(`${API_BASE}/scan/sell/results`);
+        const response = await AuthManager.fetch(`${API_BASE}/scan/sell/results`);
         if (response.ok) {
           const data = await response.json();
           if (data.stocks && data.stocks.length > 0) {
@@ -3752,5 +3820,7 @@
     // ============================================
     // 历史数据加载已在 AuthManager 初始化中处理
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="/static/kline-chart.js"></script>
 </body>
 </html>
