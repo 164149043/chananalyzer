@@ -215,8 +215,6 @@ CACHE_DIR.mkdir(exist_ok=True)
 SCAN_RESULTS_CACHE = CACHE_DIR / "scan_results.json"
 SCAN_STATUS_FILE = CACHE_DIR / "scan_status.json"
 STOCK_LIST_CACHE_FILE = CACHE_DIR / "stock_list_cache.json"
-BUY_SCAN_RESULTS_CACHE = CACHE_DIR / "buy_scan_results.json"
-SELL_SCAN_RESULTS_CACHE = CACHE_DIR / "sell_scan_results.json"
 
 # 扫描状态（内存中）
 scan_status = {
@@ -477,11 +475,6 @@ user_scan_statuses: Dict[str, Dict[str, Dict]] = defaultdict(lambda: {
 })
 user_scan_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
 
-# 保留全局状态用于兼容旧代码（已废弃，使用user_scan_statuses代替）
-buy_scan_status = {"scanning": False, "progress": 0, "total": 0, "found": 0,
-                   "start_time": None, "message": "未开始", "last_scan_time": None, "error": None}
-sell_scan_status = {"scanning": False, "progress": 0, "total": 0, "found": 0,
-                    "start_time": None, "message": "未开始", "last_scan_time": None, "error": None}
 
 
 def get_scan_process_pool():
@@ -504,14 +497,6 @@ def update_user_scan_status(user_id: str, scan_type: str, **kwargs):
     status.update(kwargs)
     # 保存到文件
     status_file = get_user_status_file(user_id, scan_type)
-    with open(status_file, 'w', encoding='utf-8') as f:
-        json.dump(status, f, ensure_ascii=False, indent=2)
-
-
-def save_scan_status_for_type(scan_type: str):
-    """保存指定类型的扫描状态（兼容旧代码）"""
-    status = buy_scan_status if scan_type == 'buy' else sell_scan_status
-    status_file = CACHE_DIR / f"{scan_type}_scan_status.json"
     with open(status_file, 'w', encoding='utf-8') as f:
         json.dump(status, f, ensure_ascii=False, indent=2)
 
@@ -631,7 +616,11 @@ def _run_scan_in_process(stock_codes: List[str], buy_types: List[str],
 
 # ============ 多用户后台扫描任务 ============
 
-async def multi_user_buy_scan_task(
+SCAN_TYPE_LABELS = {'buy': '买点', 'sell': '卖点'}
+
+
+async def multi_user_scan_task(
+    scan_type: str,
     user_id: str,
     types: List[str],
     limit: int,
@@ -641,13 +630,12 @@ async def multi_user_buy_scan_task(
     exclude_st: bool = True,
 ):
     """
-    多用户买点扫描任务
-
-    使用进程池在独立进程中执行扫描，绕过GIL限制
+    多用户扫描任务（买点/卖点统一）
 
     Args:
+        scan_type: 'buy' 或 'sell'
         user_id: 用户ID
-        types: 买点类型列表
+        types: 买卖点类型列表
         limit: 扫描数量限制
         stock_codes: 指定股票代码列表（可选）
         industries: 行业筛选（可选）
@@ -656,18 +644,20 @@ async def multi_user_buy_scan_task(
     """
     loop = asyncio.get_event_loop()
     pool = get_scan_process_pool()
+    label = SCAN_TYPE_LABELS[scan_type]
+
+    # 买点/卖点对应的参数位置
+    buy_types = types if scan_type == 'buy' else []
+    sell_types = types if scan_type == 'sell' else []
 
     try:
-        # 初始化状态
-        update_user_scan_status(user_id, 'buy',
+        update_user_scan_status(user_id, scan_type,
             scanning=True, error=None, progress=0,
             start_time=datetime.now().isoformat(),
             message="正在获取股票列表..."
         )
 
-        # 获取股票列表
         try:
-            # 如果指定了股票代码列表，直接使用
             if stock_codes:
                 codes_to_scan = stock_codes
             else:
@@ -677,48 +667,45 @@ async def multi_user_buy_scan_task(
                 else:
                     codes_to_scan = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
         except FileNotFoundError as e:
-            update_user_scan_status(user_id, 'buy',
+            update_user_scan_status(user_id, scan_type,
                 scanning=False, error=f"数据库文件不存在: {str(e)}",
                 message="数据库文件不存在，请先创建数据库"
             )
             return
 
         if not codes_to_scan:
-            update_user_scan_status(user_id, 'buy',
+            update_user_scan_status(user_id, scan_type,
                 scanning=False, error="股票列表为空",
                 message="未找到可扫描的股票"
             )
             return
 
-        update_user_scan_status(user_id, 'buy',
+        update_user_scan_status(user_id, scan_type,
             total=len(codes_to_scan),
             message=f"开始扫描 {len(codes_to_scan)} 只股票..."
         )
 
-        # 在进程池中执行扫描
         result = await loop.run_in_executor(
             pool,
             _run_scan_in_process,
-            codes_to_scan, types, [], 'buy', user_id,
+            codes_to_scan, buy_types, sell_types, scan_type, user_id,
             str(Path(__file__).parent / 'users'),
             industries, areas, exclude_st
         )
 
-        # 处理结果
         if result['success']:
-            # 保存结果
-            cache_file = get_user_cache_file(user_id, 'buy')
+            cache_file = get_user_cache_file(user_id, scan_type)
             save_scan_results_cache(cache_file, result['stocks'])
 
-            update_user_scan_status(user_id, 'buy',
+            update_user_scan_status(user_id, scan_type,
                 scanning=False,
                 progress=result['total'],
                 found=result['found'],
-                message=f"买点扫描完成，找到 {result['found']} 只股票",
+                message=f"{label}扫描完成，找到 {result['found']} 只股票",
                 last_scan_time=datetime.now().isoformat()
             )
         else:
-            update_user_scan_status(user_id, 'buy',
+            update_user_scan_status(user_id, scan_type,
                 scanning=False,
                 error=result.get('error', '未知错误'),
                 message=f"扫描失败: {result.get('error', '未知错误')}"
@@ -727,112 +714,25 @@ async def multi_user_buy_scan_task(
     except Exception as e:
         import traceback
         traceback.print_exc()
-        update_user_scan_status(user_id, 'buy',
+        update_user_scan_status(user_id, scan_type,
             scanning=False,
             error=str(e),
             message=f"扫描失败: {str(e)}"
         )
 
 
-async def multi_user_sell_scan_task(
-    user_id: str,
-    types: List[str],
-    limit: int,
-    stock_codes: List[str] = None,
-    industries: List[str] = None,
-    areas: List[str] = None,
-    exclude_st: bool = True,
-):
-    """
-    多用户卖点扫描任务
+async def multi_user_buy_scan_task(user_id, types, limit, stock_codes=None,
+                                    industries=None, areas=None, exclude_st=True):
+    """买点扫描 - 委托给统一函数"""
+    await multi_user_scan_task('buy', user_id, types, limit,
+                               stock_codes, industries, areas, exclude_st)
 
-    Args:
-        user_id: 用户ID
-        types: 卖点类型列表
-        limit: 扫描数量限制
-        stock_codes: 指定股票代码列表（可选）
-        industries: 行业筛选（可选）
-        areas: 地区筛选（可选）
-        exclude_st: 是否排除ST股票
-    """
-    loop = asyncio.get_event_loop()
-    pool = get_scan_process_pool()
 
-    try:
-        # 初始化状态
-        update_user_scan_status(user_id, 'sell',
-            scanning=True, error=None, progress=0,
-            start_time=datetime.now().isoformat(),
-            message="正在获取股票列表..."
-        )
-
-        # 获取股票列表
-        try:
-            # 如果指定了股票代码列表，直接使用
-            if stock_codes:
-                codes_to_scan = stock_codes
-            else:
-                all_stock_codes = scan_stocks_cache.get_stock_list_from_db()
-                if limit <= 0:
-                    codes_to_scan = all_stock_codes
-                else:
-                    codes_to_scan = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
-        except FileNotFoundError as e:
-            update_user_scan_status(user_id, 'sell',
-                scanning=False, error=f"数据库文件不存在: {str(e)}",
-                message="数据库文件不存在，请先创建数据库"
-            )
-            return
-
-        if not codes_to_scan:
-            update_user_scan_status(user_id, 'sell',
-                scanning=False, error="股票列表为空",
-                message="未找到可扫描的股票"
-            )
-            return
-
-        update_user_scan_status(user_id, 'sell',
-            total=len(codes_to_scan),
-            message=f"开始扫描 {len(codes_to_scan)} 只股票..."
-        )
-
-        # 在进程池中执行扫描
-        result = await loop.run_in_executor(
-            pool,
-            _run_scan_in_process,
-            codes_to_scan, [], types, 'sell', user_id,
-            str(Path(__file__).parent / 'users'),
-            industries, areas, exclude_st
-        )
-
-        # 处理结果
-        if result['success']:
-            # 保存结果
-            cache_file = get_user_cache_file(user_id, 'sell')
-            save_scan_results_cache(cache_file, result['stocks'])
-
-            update_user_scan_status(user_id, 'sell',
-                scanning=False,
-                progress=result['total'],
-                found=result['found'],
-                message=f"卖点扫描完成，找到 {result['found']} 只股票",
-                last_scan_time=datetime.now().isoformat()
-            )
-        else:
-            update_user_scan_status(user_id, 'sell',
-                scanning=False,
-                error=result.get('error', '未知错误'),
-                message=f"扫描失败: {result.get('error', '未知错误')}"
-            )
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        update_user_scan_status(user_id, 'sell',
-            scanning=False,
-            error=str(e),
-            message=f"扫描失败: {str(e)}"
-        )
+async def multi_user_sell_scan_task(user_id, types, limit, stock_codes=None,
+                                     industries=None, areas=None, exclude_st=True):
+    """卖点扫描 - 委托给统一函数"""
+    await multi_user_scan_task('sell', user_id, types, limit,
+                               stock_codes, industries, areas, exclude_st)
 
 
 def save_scan_results_cache(cache_file: Path, results: List[Dict]):
@@ -856,246 +756,6 @@ def load_scan_results_cache(cache_file: Path) -> Dict:
     return {'cache_time': None, 'stocks': []}
 
 
-def background_buy_scan_task(types: List[str], limit: int):
-    """
-    后台买点扫描任务 - 复用 scan_stocks_cache 模块
-
-    注意：这是一个同步函数，由 FastAPI 的 BackgroundTasks 在线程池中执行
-
-    Args:
-        types: 买点类型列表，如 ['1', '2', '3a', '3b']
-        limit: 扫描股票数量限制
-    """
-    global buy_scan_status
-
-    try:
-        buy_scan_status["scanning"] = True
-        buy_scan_status["error"] = None
-        buy_scan_status["progress"] = 0
-        buy_scan_status["start_time"] = datetime.now().isoformat()
-        buy_scan_status["message"] = "正在获取股票列表..."
-        save_scan_status_for_type('buy')
-
-        # 获取股票列表 - 添加详细错误处理
-        try:
-            all_stock_codes = scan_stocks_cache.get_stock_list_from_db()
-            # 当 limit <= 0 时表示扫描全市场，否则随机采样 limit 只
-            if limit <= 0:
-                stock_codes = all_stock_codes
-            else:
-                stock_codes = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
-        except FileNotFoundError as e:
-            buy_scan_status["scanning"] = False
-            buy_scan_status["error"] = f"数据库文件不存在: {str(e)}"
-            buy_scan_status["message"] = "数据库文件不存在，请先创建数据库"
-            save_scan_status_for_type('buy')
-            return
-        except RuntimeError as e:
-            buy_scan_status["scanning"] = False
-            buy_scan_status["error"] = f"数据库查询失败: {str(e)}"
-            buy_scan_status["message"] = "从数据库获取股票列表失败"
-            save_scan_status_for_type('buy')
-            return
-        except Exception as e:
-            buy_scan_status["scanning"] = False
-            buy_scan_status["error"] = f"获取股票列表异常: {str(e)}"
-            buy_scan_status["message"] = "获取股票列表时发生未知错误"
-            save_scan_status_for_type('buy')
-            return
-
-        if not stock_codes:
-            buy_scan_status["scanning"] = False
-            buy_scan_status["error"] = "股票列表为空"
-            buy_scan_status["message"] = "未找到可扫描的股票"
-            save_scan_status_for_type('buy')
-            return
-
-        buy_scan_status["total"] = len(stock_codes)
-        buy_scan_status["message"] = f"开始扫描 {len(stock_codes)} 只股票..."
-        save_scan_status_for_type('buy')
-
-        # 定义进度回调函数
-        def progress_callback(current, total, found):
-            buy_scan_status["progress"] = current
-            buy_scan_status["found"] = found
-            buy_scan_status["message"] = f"扫描中 {current}/{total}"
-            save_scan_status_for_type('buy')
-
-        # 调用 scan_stocks_cache 的扫描函数（带进度回调）
-        results = scan_stocks_cache.scan_stocks(
-            stock_codes=stock_codes,
-            buy_types=types,
-            sell_types=[],
-            verbose=False,
-            progress_callback=progress_callback
-        )
-
-        # 获取股票信息（名称、行业）
-        result_codes = [r['code'] for r in results]
-        stock_info = scan_stocks_cache.get_stock_info_bulk(result_codes)
-
-        # 组装结果（包含股票名称）
-        formatted_results = []
-        for r in results:
-            info = stock_info.get(r['code'], {})
-            # 找到最新的信号（按日期排序）
-            signals = r.get('signals', [])
-            latest_signal = None
-            if signals:
-                sorted_signals = sorted(signals, key=lambda x: x['date'], reverse=True)
-                latest_signal = sorted_signals[0]
-
-            formatted_results.append({
-                'code': r['code'],
-                'name': info.get('name', ''),
-                'current_price': r.get('latest_price', 0),
-                'change_pct': r.get('change_pct', 0),
-                'signals': signals,
-                'latest_signal': latest_signal
-            })
-
-        # 保存结果
-        save_scan_results_cache(BUY_SCAN_RESULTS_CACHE, formatted_results)
-
-        buy_scan_status["scanning"] = False
-        buy_scan_status["progress"] = buy_scan_status["total"]
-        buy_scan_status["found"] = len(formatted_results)
-        buy_scan_status["message"] = f"买点扫描完成，找到 {len(formatted_results)} 只股票"
-        buy_scan_status["last_scan_time"] = datetime.now().isoformat()
-        save_scan_status_for_type('buy')
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        buy_scan_status["scanning"] = False
-        buy_scan_status["error"] = str(e)
-        buy_scan_status["message"] = f"扫描失败: {str(e)}"
-        save_scan_status_for_type('buy')
-
-
-def background_sell_scan_task(types: List[str], limit: int):
-    """
-    后台卖点扫描任务 - 复用 scan_stocks_cache 模块
-
-    注意：这是一个同步函数，由 FastAPI 的 BackgroundTasks 在线程池中执行
-
-    Args:
-        types: 卖点类型列表，如 ['1', '2s', '3a', '3b']
-        limit: 扫描股票数量限制
-    """
-    global sell_scan_status
-
-    try:
-        sell_scan_status["scanning"] = True
-        sell_scan_status["error"] = None
-        sell_scan_status["progress"] = 0
-        sell_scan_status["start_time"] = datetime.now().isoformat()
-        sell_scan_status["message"] = "正在获取股票列表..."
-        save_scan_status_for_type('sell')
-
-        # 获取股票列表 - 添加详细错误处理
-        try:
-            all_stock_codes = scan_stocks_cache.get_stock_list_from_db()
-            # 当 limit <= 0 时表示扫描全市场，否则随机采样 limit 只
-            if limit <= 0:
-                stock_codes = all_stock_codes
-            else:
-                stock_codes = random.sample(all_stock_codes, min(limit, len(all_stock_codes)))
-        except FileNotFoundError as e:
-            sell_scan_status["scanning"] = False
-            sell_scan_status["error"] = f"数据库文件不存在: {str(e)}"
-            sell_scan_status["message"] = "数据库文件不存在，请先创建数据库"
-            save_scan_status_for_type('sell')
-            return
-        except RuntimeError as e:
-            sell_scan_status["scanning"] = False
-            sell_scan_status["error"] = f"数据库查询失败: {str(e)}"
-            sell_scan_status["message"] = "从数据库获取股票列表失败"
-            save_scan_status_for_type('sell')
-            return
-        except Exception as e:
-            sell_scan_status["scanning"] = False
-            sell_scan_status["error"] = f"获取股票列表异常: {str(e)}"
-            sell_scan_status["message"] = "获取股票列表时发生未知错误"
-            save_scan_status_for_type('sell')
-            return
-
-        if not stock_codes:
-            sell_scan_status["scanning"] = False
-            sell_scan_status["error"] = "股票列表为空"
-            sell_scan_status["message"] = "未找到可扫描的股票"
-            save_scan_status_for_type('sell')
-            return
-
-        sell_scan_status["total"] = len(stock_codes)
-        sell_scan_status["message"] = f"开始扫描 {len(stock_codes)} 只股票..."
-        save_scan_status_for_type('sell')
-
-        # 定义进度回调函数
-        def progress_callback(current, total, found):
-            sell_scan_status["progress"] = current
-            sell_scan_status["found"] = found
-            sell_scan_status["message"] = f"扫描中 {current}/{total}"
-            save_scan_status_for_type('sell')
-
-        # 调用 scan_stocks_cache 的扫描函数（带进度回调）
-        results = scan_stocks_cache.scan_stocks(
-            stock_codes=stock_codes,
-            buy_types=[],
-            sell_types=types,
-            verbose=False,
-            progress_callback=progress_callback
-        )
-
-        # 获取股票信息（名称、行业）
-        result_codes = [r['code'] for r in results]
-        stock_info = scan_stocks_cache.get_stock_info_bulk(result_codes)
-
-        # 组装结果（包含股票名称）
-        formatted_results = []
-        for r in results:
-            info = stock_info.get(r['code'], {})
-            # 找到最新的信号（按日期排序）
-            signals = r.get('signals', [])
-            latest_signal = None
-            if signals:
-                sorted_signals = sorted(signals, key=lambda x: x['date'], reverse=True)
-                latest_signal = sorted_signals[0]
-
-            formatted_results.append({
-                'code': r['code'],
-                'name': info.get('name', ''),
-                'current_price': r.get('latest_price', 0),
-                'change_pct': r.get('change_pct', 0),
-                'signals': signals,
-                'latest_signal': latest_signal
-            })
-
-        # 保存结果
-        save_scan_results_cache(SELL_SCAN_RESULTS_CACHE, formatted_results)
-
-        sell_scan_status["scanning"] = False
-        sell_scan_status["progress"] = sell_scan_status["total"]
-        sell_scan_status["found"] = len(formatted_results)
-        sell_scan_status["message"] = f"卖点扫描完成，找到 {len(formatted_results)} 只股票"
-        sell_scan_status["last_scan_time"] = datetime.now().isoformat()
-        save_scan_status_for_type('sell')
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        sell_scan_status["scanning"] = False
-        sell_scan_status["error"] = str(e)
-        sell_scan_status["message"] = f"扫描失败: {str(e)}"
-        save_scan_status_for_type('sell')
-
-
-def save_scan_status_for_type(scan_type: str):
-    """保存指定类型的扫描状态"""
-    status = buy_scan_status if scan_type == 'buy' else sell_scan_status
-    status_file = CACHE_DIR / f"{scan_type}_scan_status.json"
-    with open(status_file, 'w', encoding='utf-8') as f:
-        json.dump(status, f, ensure_ascii=False, indent=2)
 
 
 # ============ API 接口 ============
@@ -1451,7 +1111,7 @@ async def get_industries():
         return {"industries": industries}
     except Exception as e:
         print(f"获取行业列表失败: {e}")
-        return {"industries": []}
+        return {"industries": [], "error": str(e)}
 
 
 @app.get("/api/areas")
@@ -1479,7 +1139,7 @@ async def get_areas():
         return {"areas": areas}
     except Exception as e:
         print(f"获取地区列表失败: {e}")
-        return {"areas": []}
+        return {"areas": [], "error": str(e)}
 
 
 @app.get("/api/stock/{code}/signals")
@@ -1566,6 +1226,61 @@ async def get_stock_signals(code: str):
             "latest_sell": None,
             "error": str(e)
         }
+
+
+@app.get("/api/stock/{code}/kline")
+async def get_stock_kline(code: str, limit: int = 500):
+    """获取K线原始数据 + 缠论标记（笔/线段/中枢/买卖点）
+
+    支持股票代码或名称输入（模糊匹配）
+    """
+    resolved_code, resolved_name, success = resolve_stock_code(code)
+    if not success:
+        return {"error": f"未找到股票: {code}"}
+
+    try:
+        limit = max(50, min(limit, 3000))
+
+        # 从数据库查询原始K线
+        from ChanAnalyzer.database import get_db, KLineData
+        with get_db() as db:
+            query = db.query(KLineData).filter(
+                KLineData.code == resolved_code,
+                KLineData.kl_type == "DAY"
+            ).order_by(KLineData.timestamp.desc()).limit(limit)
+            kline_rows = query.all()
+            kline_rows.reverse()
+
+        if not kline_rows:
+            return {"code": resolved_code, "name": resolved_name, "error": "无K线数据"}
+
+        # 获取缠论分析
+        ChanAnalyzer = import_chan_analyzer()
+        analyzer = ChanAnalyzer(code=resolved_code)
+        analysis = analyzer.get_analysis()
+
+        if "error" in analysis:
+            return {"code": resolved_code, "name": resolved_name, "error": analysis["error"]}
+
+        return {
+            "code": resolved_code,
+            "name": resolved_name,
+            "data_date": kline_rows[-1].date,
+            "kline": [
+                {"date": r.date, "open": r.open, "high": r.high,
+                 "low": r.low, "close": r.close, "volume": r.volume}
+                for r in kline_rows
+            ],
+            "bi_list": analysis.get("bi_list", []),
+            "seg_list": analysis.get("seg_list", []),
+            "zs_list": analysis.get("zs_list", []),
+            "buy_signals": analysis.get("buy_signals", []),
+            "sell_signals": analysis.get("sell_signals", []),
+        }
+    except Exception as e:
+        import traceback
+        print(f"[get_stock_kline] {resolved_code} 获取K线失败: {e}\n{traceback.format_exc()}")
+        return {"code": resolved_code, "name": resolved_name, "error": str(e)}
 
 
 def get_stock_name_by_code(code: str) -> str:
