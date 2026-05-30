@@ -52,7 +52,12 @@ from Common.CEnum import AUTYPE, DATA_SRC, KL_TYPE
 # 数据库路径
 DB_PATH = os.path.join(os.path.dirname(__file__), "chan.db")
 
-# 移除缓存，直接从数据库查询
+
+def _get_db_connection():
+    """获取数据库连接（启用 WAL 模式优化并发读性能）"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 
 
 def _get_tushare_token():
@@ -96,7 +101,7 @@ def get_stock_list_from_db(
         )
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db_connection()
         cursor = conn.cursor()
 
         # 获取所有股票代码
@@ -141,7 +146,7 @@ def get_stock_info_bulk(stock_codes: List[str]) -> Dict[str, Dict[str, str]]:
     """
     result = {}
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db_connection()
         cursor = conn.cursor()
 
         # 构建查询条件
@@ -176,7 +181,7 @@ def get_stock_info_bulk(stock_codes: List[str]) -> Dict[str, Dict[str, str]]:
 def get_latest_price_from_db(code: str) -> Dict[str, Any]:
     """从数据库获取股票最新价格信息"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_db_connection()
         cursor = conn.cursor()
 
         # 获取最新两根K线，用于计算涨跌幅
