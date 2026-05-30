@@ -4,6 +4,8 @@ __pycache__
 *.vscode
 *.log
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 config.yaml
@@ -13,7 +15,6 @@ cos_config.yaml
 CLAUDE.md
 # 环境变量和敏感配置
 .env
-# ai_config.yaml 已移除此排除 - 无敏感信息，需要上传
 
 # 虚拟环境
 venv/
@@ -22,6 +23,7 @@ ENV/
 
 # Claude Code 配置
 .claude/
+.mcp.json
 
 # 缓存和临时文件
 stock_list_cache.json
@@ -46,7 +48,17 @@ htmlcov/
 web/users/
 web/cache/
 
+# Playwright MCP
+.playwright-mcp/
+
+# Codex
+.codex/
+
+# 中文命名临时目录
+突破文件/
+
 # 其他
 .DS_Store
 *.swp
 *.swo
+AGENTS.md
