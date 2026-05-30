@@ -6,11 +6,16 @@
 2. 一个决策者AI综合分析师意见做最终决策
 """
 import os
+import time
 import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2  # 秒
+API_TIMEOUT = 120  # 秒
 
 
 @dataclass
@@ -89,10 +94,12 @@ class MultiAIAnalyzer:
         self.client = OpenAI(
             api_key=api_key,
             base_url=provider_config['base_url'],
+            timeout=API_TIMEOUT,
         )
         self.async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=provider_config['base_url'],
+            timeout=API_TIMEOUT,
         )
 
     def format_analysis_data(
@@ -131,6 +138,20 @@ class MultiAIAnalyzer:
         user_prompt = get_decision_maker_user_prompt(analyst_opinions)
         return system_prompt, user_prompt
 
+    def _call_with_retry(self, func, *args, **kwargs):
+        """带指数退避的重试封装"""
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_BASE_DELAY * (2 ** attempt)
+                    print(f"[重试] 第{attempt + 1}次失败: {e}，{delay}秒后重试...")
+                    time.sleep(delay)
+        raise last_error
+
     def _call_analyst(
         self,
         analyst_id: int,
@@ -148,15 +169,19 @@ class MultiAIAnalyzer:
 
         import time
         t0 = time.time()
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=temperature,
-            max_tokens=config['max_tokens'],
-        )
+
+        def _do_call():
+            return self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=temperature,
+                max_tokens=config['max_tokens'],
+            )
+
+        response = self._call_with_retry(_do_call)
         elapsed = time.time() - t0
 
         return AnalystOpinion(
@@ -176,16 +201,18 @@ class MultiAIAnalyzer:
         """调用决策者API"""
         config = self.config['decision_maker']
 
-        response = self.client.chat.completions.create(
-            model=config['model'],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=config['temperature'],
-            max_tokens=config['max_tokens'],
-        )
+        def _do_call():
+            return self.client.chat.completions.create(
+                model=config['model'],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=config['temperature'],
+                max_tokens=config['max_tokens'],
+            )
 
+        response = self._call_with_retry(_do_call)
         return response.choices[0].message.content
 
     def analyze(
