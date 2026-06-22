@@ -1,267 +1,186 @@
 """
-用户会话和认证管理模块
+用户认证管理模块（注册登录 + 强制登录）
 
-支持简单的JWT Token认证，用于多用户环境下的会话隔离
+- bcrypt 密码哈希 + PyJWT 标准 token
+- 基于 SQLite users 表
+- 强制登录：无 token / 无效 token / 用户被禁用 → 401
 """
 import os
-import uuid
-from dotenv import load_dotenv
-from datetime import datetime, timedelta
-from typing import Optional
-from functools import wraps
-import json
+import re
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-# 加载 .env 文件 - 必须在读取环境变量之前调用
+from dotenv import load_dotenv
+from fastapi import Header, HTTPException, Depends
+from sqlalchemy.orm import Session
+
+from web.security import (
+    hash_password,
+    verify_password,
+    create_jwt,
+    decode_jwt,
+)
+from ChanAnalyzer.database import get_db, User
+
 load_dotenv()
 
-# 从环境变量读取密钥，或使用默认值
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'chanalyzer-secret-key-change-in-production')
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 24
-
-# 管理员账号配置（必须从 .env 文件配置）
+# 管理员账号配置（首启引导用，从 .env 读取）
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
+# 用户名校验：3-32 位字母数字下划线
+_USERNAME_RE = re.compile(r'^[A-Za-z0-9_]{3,32}$')
+MIN_PASSWORD_LENGTH = 6
 
-def verify_credentials(username: str, password: str) -> bool:
-    """
-    验证管理员账号密码
-
-    Args:
-        username: 用户名
-        password: 密码
-
-    Returns:
-        验证成功返回 True，否则返回 False
-    """
-    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
-
-# 用户数据存储目录
+# 用户扫描缓存文件存储目录（保留原行为）
 USER_DATA_DIR = Path(__file__).parent / "users"
 USER_DATA_DIR.mkdir(exist_ok=True)
 
 
-def generate_user_id() -> str:
-    """生成新的用户ID"""
-    return str(uuid.uuid4())
+# ============ 用户管理 ============
+
+def validate_username(username: str) -> Optional[str]:
+    """校验用户名，返回错误信息或 None"""
+    if not username:
+        return "用户名不能为空"
+    if not _USERNAME_RE.match(username):
+        return "用户名为 3-32 位字母、数字或下划线"
+    return None
 
 
-def create_session_token(user_id: str) -> tuple[str, str]:
+def register_user(db: Session, username: str, password: str) -> User:
     """
-    创建会话Token
+    注册新用户
 
-    Args:
-        user_id: 用户ID
-
-    Returns:
-        (token, user_id) - 如果用户已存在则返回现有user_id，否则创建新的
+    Raises:
+        HTTPException(400): 用户名格式错误 / 已存在 / 密码过短
     """
-    # 如果user_id为空或为'guest'，生成新ID
-    if not user_id or user_id == 'guest':
-        user_id = generate_user_id()
+    err = validate_username(username)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(status_code=400, detail=f"密码至少 {MIN_PASSWORD_LENGTH} 位")
 
-    # 简单的Token实现（使用user_id + 时间戳的hash）
-    # 生产环境应使用标准的jwt库
-    token_data = {
-        'user_id': user_id,
-        'expire': (datetime.now() + timedelta(hours=TOKEN_EXPIRE_HOURS)).isoformat()
-    }
+    existing = db.query(User).filter(User.username == username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="用户名已存在")
 
-    # 将Token数据存储到用户文件中
-    user_file = USER_DATA_DIR / f"{user_id}.json"
-    user_data = {}
-    if user_file.exists():
-        with open(user_file, 'r', encoding='utf-8') as f:
-            user_data = json.load(f)
-
-    user_data['token'] = _encode_token(token_data)
-    user_data['last_active'] = datetime.now().isoformat()
-
-    with open(user_file, 'w', encoding='utf-8') as f:
-        json.dump(user_data, f, ensure_ascii=False, indent=2)
-
-    return user_data['token'], user_id
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        role='user',
+        status='active',
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
-def _encode_token(data: dict) -> str:
-    """简单的Token编码（生产环境应使用PyJWT）"""
-    import base64
-    import hashlib
+def authenticate(db: Session, username: str, password: str) -> Optional[User]:
+    """验证用户名密码，返回 User 或 None；仅 status='active' 可登录"""
+    if not username or not password:
+        return None
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not verify_password(password, user.password_hash):
+        return None
+    if user.status != 'active':
+        return None
+    user.last_login_at = datetime.now()
+    db.commit()
+    return user
 
-    json_str = json.dumps(data, separators=(',', ':'))
-    signature = hashlib.sha256(f"{json_str}{SECRET_KEY}".encode()).hexdigest()[:16]
-    encoded = base64.b64encode(f"{json_str}.{signature}".encode()).decode()
-    return encoded
+
+def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+    return db.query(User).filter(User.id == user_id).first()
 
 
-def _decode_token(token: str) -> Optional[dict]:
-    """简单的Token解码"""
-    import base64
-    import hashlib
+def ensure_admin_account(db: Session) -> None:
+    """
+    首启引导 .env 管理员账号到数据库
 
+    若 users 表无该 admin 用户则创建，保证现有管理员登录不中断。
+    """
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        return
+    existing = db.query(User).filter(User.username == ADMIN_USERNAME).first()
+    if existing:
+        if existing.role != 'admin':
+            existing.role = 'admin'
+            db.commit()
+        return
+    admin = User(
+        username=ADMIN_USERNAME,
+        password_hash=hash_password(ADMIN_PASSWORD),
+        role='admin',
+        status='active',
+    )
+    db.add(admin)
+    db.commit()
+
+
+# ============ Token ============
+
+def create_token(user: User) -> str:
+    """为用户签发 JWT"""
+    return create_jwt(user.id, user.role)
+
+
+def verify_token(token: str, db: Session) -> Optional[int]:
+    """校验 token，返回 user_id(int) 或 None"""
+    payload = decode_jwt(token)
+    if not payload:
+        return None
     try:
-        decoded = base64.b64decode(token.encode()).decode()
-        json_str, signature = decoded.rsplit('.', 1)
-
-        # 验证签名
-        expected_signature = hashlib.sha256(f"{json_str}{SECRET_KEY}".encode()).hexdigest()[:16]
-        if signature != expected_signature:
-            return None
-
-        data = json.loads(json_str)
-
-        # 检查过期
-        expire = datetime.fromisoformat(data['expire'])
-        if datetime.now() > expire:
-            return None
-
-        return data
-    except Exception:
+        user_id = int(payload.get('sub'))
+    except (TypeError, ValueError):
         return None
-
-
-def verify_token(token: str) -> Optional[str]:
-    """
-    验证Token并返回user_id
-
-    Args:
-        token: 会话Token
-
-    Returns:
-        user_id 或 None
-    """
-    if not token:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or user.status != 'active':
         return None
-
-    token_data = _decode_token(token)
-    if not token_data:
-        return None
-
-    user_id = token_data.get('user_id')
-    if not user_id:
-        return None
-
-    # 验证用户文件存在
-    user_file = USER_DATA_DIR / f"{user_id}.json"
-    if not user_file.exists():
-        return None
-
-    # 更新最后活跃时间
-    try:
-        with open(user_file, 'r', encoding='utf-8') as f:
-            user_data = json.load(f)
-        user_data['last_active'] = datetime.now().isoformat()
-        with open(user_file, 'w', encoding='utf-8') as f:
-            json.dump(user_data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
     return user_id
 
 
-def get_or_create_user(token: Optional[str] = None) -> tuple[str, str]:
+# ============ 用户缓存文件路径（保留原行为）============
+
+def get_user_cache_file(user_id, scan_type: str) -> Path:
+    """获取用户的扫描缓存文件路径"""
+    return USER_DATA_DIR / f"{scan_type}_scan_{user_id}.json"
+
+
+def get_user_status_file(user_id, scan_type: str) -> Path:
+    """获取用户的扫描状态文件路径"""
+    return USER_DATA_DIR / f"{scan_type}_status_{user_id}.json"
+
+
+# ============ FastAPI 依赖 ============
+
+async def get_current_user(authorization: str = Header(None)) -> int:
     """
-    获取或创建用户
+    FastAPI 依赖：获取当前用户 id（int）
 
-    Args:
-        token: 客户端传递的Token
-
-    Returns:
-        (token, user_id)
-    """
-    user_id = verify_token(token) if token else None
-    return create_session_token(user_id or 'guest')
-
-
-def get_user_cache_file(user_id: str, scan_type: str) -> Path:
-    """
-    获取用户的缓存文件路径
-
-    Args:
-        user_id: 用户ID
-        scan_type: 扫描类型 ('buy' 或 'sell')
-
-    Returns:
-        缓存文件路径
-    """
-    filename = f"{scan_type}_scan_{user_id}.json"
-    return USER_DATA_DIR / filename
-
-
-def get_user_status_file(user_id: str, scan_type: str) -> Path:
-    """
-    获取用户的状态文件路径
-
-    Args:
-        user_id: 用户ID
-        scan_type: 扫描类型 ('buy' 或 'sell')
-
-    Returns:
-        状态文件路径
-    """
-    filename = f"{scan_type}_status_{user_id}.json"
-    return USER_DATA_DIR / filename
-
-
-def cleanup_inactive_users(days: int = 7) -> int:
-    """
-    清理不活跃的用户数据
-
-    Args:
-        days: 不活跃天数阈值
-
-    Returns:
-        清理的用户数量
-    """
-    threshold = datetime.now() - timedelta(days=days)
-    cleaned = 0
-
-    for user_file in USER_DATA_DIR.glob("*.json"):
-        if user_file.name.startswith('buy_') or user_file.name.startswith('sell_'):
-            continue  # 跳过缓存文件
-
-        try:
-            with open(user_file, 'r', encoding='utf-8') as f:
-                user_data = json.load(f)
-
-            last_active = datetime.fromisoformat(user_data.get('last_active', ''))
-            if last_active < threshold:
-                user_file.unlink()
-                # 同时清理该用户的缓存文件
-                for cache_file in USER_DATA_DIR.glob(f"*_{user_id}.json"):
-                    cache_file.unlink()
-                cleaned += 1
-        except Exception:
-            continue
-
-    return cleaned
-
-
-# FastAPI依赖
-from fastapi import Header, HTTPException
-
-
-async def get_current_user(authorization: str = Header(None)) -> str:
-    """
-    FastAPI依赖：获取当前用户ID
-
-    用法:
-        @app.get("/api/protected")
-        async def protected_endpoint(user_id: str = Depends(get_current_user)):
-            ...
+    无 token / 无效 token / 用户被禁用 → 401
     """
     if not authorization:
-        # 允许无Token访问，自动创建新用户
-        _, user_id = get_or_create_user()
-        return user_id
-
-    # 支持两种格式: "Bearer <token>" 或直接token
-    token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-
-    user_id = verify_token(token)
+        raise HTTPException(status_code=401, detail="未登录，请先登录")
+    token = authorization[7:] if authorization.startswith("Bearer ") else authorization
+    with get_db() as db:
+        user_id = verify_token(token, db)
     if not user_id:
-        raise HTTPException(status_code=401, detail="无效的会话，请刷新页面")
+        raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
+    return user_id
 
+
+async def get_current_admin(user_id: int = Depends(get_current_user)) -> int:
+    """
+    FastAPI 依赖：要求当前用户为 admin，否则 403。
+
+    复用 get_current_user 完成 token + status 校验，再查库验证 role
+    （不信任 JWT 中的 role 字段，防篡改）。返回 admin 的 user_id。
+    """
+    with get_db() as db:
+        user = get_user_by_id(db, user_id)
+        if not user or user.role != 'admin':
+            raise HTTPException(status_code=403, detail="需要管理员权限")
     return user_id

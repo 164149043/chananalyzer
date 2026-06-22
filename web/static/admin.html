@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 - 缠论分析</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --primary: #c8372e;
+      --primary-hover: #e85a4f;
+      --primary-light: rgba(200, 55, 46, 0.15);
+      --bg-primary: #0a0a0a;
+      --bg-secondary: #111111;
+      --bg-card: rgba(26, 26, 26, 0.85);
+      --text-primary: #e8e8e8;
+      --text-secondary: #a0a0a0;
+      --text-muted: #6b6b6b;
+      --border: rgba(255, 255, 255, 0.1);
+      --border-hover: rgba(255, 255, 255, 0.2);
+      --error: #ef4444;
+      --success: #22c55e;
+      --warning: #f59e0b;
+    }
+    body {
+      font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      position: relative;
+    }
+    .bg-gradient {
+      position: fixed; inset: 0;
+      background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, var(--bg-primary) 50%, rgba(99,102,241,0.04) 100%);
+      z-index: 0; pointer-events: none;
+    }
+    .floating-shapes { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+    .shape { position: absolute; border-radius: 50%; background: var(--primary-light); filter: blur(60px); animation: float 20s ease-in-out infinite; }
+    .shape:nth-child(1) { width: 120px; height: 120px; left: 8%; top: 10%; animation-duration: 22s; }
+    .shape:nth-child(2) { width: 90px; height: 90px; left: 85%; top: 15%; animation-duration: 26s; animation-delay: 2s; }
+    .shape:nth-child(3) { width: 70px; height: 70px; left: 75%; top: 75%; animation-duration: 18s; animation-delay: 4s; }
+    @keyframes float { 0%,100% { transform: translate(0,0) scale(1); } 25% { transform: translate(30px,-30px) scale(1.15); } 50% { transform: translate(-30px,30px) scale(0.85); } 75% { transform: translate(-20px,-20px) scale(1.1); } }
+
+    /* 顶部导航 */
+    .admin-top-nav {
+      position: relative; z-index: 10;
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 28px;
+      background: rgba(10,10,10,0.75);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .admin-logo { font-family: 'Noto Serif SC', serif; font-size: 19px; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+    .admin-logo .logo-mark { width: 32px; height: 32px; background: var(--primary); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; box-shadow: 0 6px 20px -6px rgba(200,55,46,0.5); }
+    .admin-logo .sep { color: var(--text-muted); font-weight: 400; font-size: 15px; }
+    .admin-logo .sub { color: var(--text-secondary); font-weight: 400; font-size: 16px; }
+    .admin-user { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 14px; color: var(--text-secondary); }
+    .admin-user .name { color: var(--text-primary); font-weight: 500; }
+    .nav-link { color: var(--text-secondary); text-decoration: none; font-size: 14px; padding: 6px 12px; border-radius: 8px; transition: all 0.2s; }
+    .nav-link:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+    .logout-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; transition: all 0.2s; font-family: inherit; }
+    .logout-btn:hover { color: var(--primary); border-color: var(--primary); }
+
+    /* 主体 */
+    .admin-main { position: relative; z-index: 5; max-width: 1280px; margin: 0 auto; padding: 28px; }
+    .admin-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 40px -12px rgba(0,0,0,0.5);
+      animation: fadeInUp 0.5s ease-out;
+    }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .card-header h2 { font-size: 18px; font-weight: 600; }
+    .card-header .count { font-size: 13px; color: var(--text-muted); }
+
+    /* 表格 */
+    .table-wrap { overflow-x: auto; }
+    table.users { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .users thead th { text-align: left; padding: 12px 14px; color: var(--text-muted); font-weight: 500; font-size: 12px; letter-spacing: 0.03em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .users tbody td { padding: 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .users tbody tr:last-child td { border-bottom: none; }
+    .users tbody tr:hover { background: rgba(255,255,255,0.02); }
+    .username-cell { color: var(--text-primary); font-weight: 500; }
+    .credits-cell { color: var(--primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .role-tag, .status-tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .role-admin { background: rgba(200,55,46,0.15); color: var(--primary); }
+    .role-user { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+    .status-active { background: rgba(34,197,94,0.15); color: var(--success); }
+    .status-disabled { background: rgba(239,68,68,0.15); color: var(--error); }
+    .time-cell { color: var(--text-muted); font-size: 12px; }
+    .actions-cell { display: flex; gap: 6px; }
+    .act-btn { padding: 5px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-secondary); transition: all 0.2s; white-space: nowrap; font-family: inherit; }
+    .act-btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
+    .act-btn.recharge { background: linear-gradient(135deg, var(--primary), var(--primary-hover)); border: none; color: #fff; }
+    .act-btn.recharge:hover { box-shadow: 0 6px 18px -6px rgba(200,55,46,0.5); }
+    .act-btn.deduct:hover { color: var(--warning); border-color: var(--warning); }
+    .act-btn.disable:hover { color: var(--error); border-color: var(--error); }
+    .act-btn.enable:hover { color: var(--success); border-color: var(--success); }
+    .empty-row td { text-align: center; color: var(--text-muted); padding: 40px; }
+
+    /* 弹窗 */
+    .modal-mask { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; padding: 20px; }
+    .modal-mask.show { display: flex; }
+    .modal-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 100%; max-width: 460px; box-shadow: 0 30px 60px -15px rgba(0,0,0,0.7); animation: modalIn 0.25s ease-out; }
+    .modal-card.wide { max-width: 760px; }
+    @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+    .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+    .modal-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+    .field input { width: 100%; height: 42px; padding: 0 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; color: var(--text-primary); font-size: 14px; outline: none; transition: border-color 0.2s; font-family: inherit; }
+    .field input:focus { border-color: var(--primary); }
+    .balance-line { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+    .balance-line b { color: var(--primary); font-size: 17px; font-weight: 600; }
+    .modal-error { display: none; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 10px; padding: 10px 14px; font-size: 13px; color: var(--error); margin-bottom: 14px; }
+    .modal-error.show { display: block; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+    .btn { padding: 9px 20px; border-radius: 10px; font-size: 14px; cursor: pointer; border: none; transition: all 0.2s; font-family: inherit; }
+    .btn-cancel { background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--border); }
+    .btn-cancel:hover { color: var(--text-primary); }
+    .btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-hover)); color: #fff; }
+    .btn-primary:hover { box-shadow: 0 8px 20px -8px rgba(200,55,46,0.5); }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .tx-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .tx-table th { text-align: left; padding: 10px 12px; color: var(--text-muted); font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--border); }
+    .tx-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .tx-table tr:last-child td { border-bottom: none; }
+    .tx-delta-up { color: var(--success); font-weight: 600; }
+    .tx-delta-down { color: var(--error); font-weight: 600; }
+    .tx-empty { text-align: center; color: var(--text-muted); padding: 30px; }
+    .loading { text-align: center; color: var(--text-muted); padding: 40px; }
+  </style>
+</head>
+<body>
+  <div class="bg-gradient"></div>
+  <div class="floating-shapes">
+    <div class="shape"></div><div class="shape"></div><div class="shape"></div>
+  </div>
+
+  <header class="admin-top-nav">
+    <div class="admin-logo">
+      <div class="logo-mark">纏</div>
+      <span>缠论分析</span>
+      <span class="sep">/</span>
+      <span class="sub">管理后台</span>
+    </div>
+    <div class="admin-user">
+      <span>当前管理员：<span class="name" id="adminName">-</span></span>
+      <a href="/app" class="nav-link">回主站</a>
+      <button class="logout-btn" id="logoutBtn">退出登录</button>
+    </div>
+  </header>
+
+  <main class="admin-main">
+    <div class="admin-card">
+      <div class="card-header">
+        <h2>用户管理</h2>
+        <span class="count" id="userCount">共 0 个用户</span>
+      </div>
+      <div class="table-wrap">
+        <table class="users">
+          <thead>
+            <tr>
+              <th>ID</th><th>用户名</th><th>角色</th><th>积分</th>
+              <th>状态</th><th>注册时间</th><th>最后登录</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="usersTbody">
+            <tr class="empty-row"><td colspan="8" class="loading">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- 积分调整弹窗（充值/扣减复用） -->
+  <div class="modal-mask" id="creditModal">
+    <div class="modal-card">
+      <div class="modal-title" id="creditModalTitle">调整积分</div>
+      <div class="modal-sub" id="creditModalSub"></div>
+      <div class="balance-line">当前积分：<b id="creditCurrent">0</b></div>
+      <div class="field">
+        <label>金额（正整数）</label>
+        <input type="number" id="creditAmount" min="1" step="1" placeholder="请输入正整数">
+      </div>
+      <div class="field">
+        <label>变动原因（必填，最多 255 字）</label>
+        <input type="text" id="creditReason" maxlength="255" placeholder="如：活动赠送 / 误充回收">
+      </div>
+      <div class="modal-error" id="creditError"></div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" id="creditCancel">取消</button>
+        <button class="btn btn-primary" id="creditSubmit">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 流水弹窗 -->
+  <div class="modal-mask" id="txModal">
+    <div class="modal-card wide">
+      <div class="modal-title">积分流水</div>
+      <div class="modal-sub" id="txModalSub"></div>
+      <div class="table-wrap">
+        <table class="tx-table">
+          <thead><tr><th>时间</th><th>变动</th><th>变动后余额</th><th>原因</th><th>操作人</th></tr></thead>
+          <tbody id="txTbody"><tr><td colspan="5" class="loading">加载中...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-cancel" id="txClose">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

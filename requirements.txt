@@ -34,6 +34,11 @@ pyyaml>=6.0.0  # YAML配置文件解析
 # 环境变量
 python-dotenv>=1.0.0
 
+# 用户认证（注册登录、图形验证码）
+bcrypt>=4.1.0
+PyJWT>=2.8.0
+Pillow>=10.0.0
+
 # 开发工具
 pytest>=7.4.0
 pytest-asyncio>=0.21.0

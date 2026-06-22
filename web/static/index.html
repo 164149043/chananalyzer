@@ -1269,6 +1269,10 @@
     <!-- 顶部导航 -->
     <header class="top-nav">
       <div class="app-logo">缠论分析</div>
+      <div class="user-info" id="userInfo" style="display:none; margin-left:auto; color:#a0a0a0; font-size:13px; margin-right:14px; align-self:center;">
+        <span id="userName"></span>
+      </div>
+      <a id="adminLink" href="/admin" style="display:none; color:#c8372e; font-size:13px; text-decoration:none; padding:5px 12px; border:1px solid rgba(200,55,46,0.4); border-radius:8px; align-self:center; margin-right:6px;">管理后台</a>
       <button class="logout-btn" id="logoutBtn" title="退出登录">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
@@ -2115,20 +2119,46 @@
         return token ? { 'Authorization': `Bearer ${token}` } : {};
       },
 
-      // 封装fetch请求，自动添加认证头
+      // 封装fetch请求，自动添加认证头，统一处理 401（登录失效跳登录页）
       async fetch(url, options = {}) {
         const headers = {
           ...options.headers,
           ...this.getAuthHeaders()
         };
-        return fetch(url, { ...options, headers });
+        const response = await fetch(url, { ...options, headers });
+        if (response.status === 401) {
+          this.clear();
+          window.location.href = '/?expired=1';
+          throw new Error('登录已失效，请重新登录');
+        }
+        return response;
       }
     };
+
+    // 加载并显示当前用户名（顶部导航）
+    async function loadUserInfo() {
+      try {
+        const resp = await AuthManager.fetch(`${API_BASE}/auth/me`);
+        if (resp.ok) {
+          const u = await resp.json();
+          const nameEl = document.getElementById('userName');
+          const infoEl = document.getElementById('userInfo');
+          if (nameEl) nameEl.textContent = u.username;
+          if (infoEl) infoEl.style.display = '';
+          if (u.role === 'admin') {
+            const adminLink = document.getElementById('adminLink');
+            if (adminLink) adminLink.style.display = 'inline-block';
+          }
+        }
+      } catch (e) { /* 忽略 */ }
+    }
 
     // 页面加载时初始化用户
     document.addEventListener('DOMContentLoaded', async () => {
       // 检查认证状态
       await AuthManager.init();
+      // init 成功才会到这里，加载当前用户名
+      if (AuthManager.initialized) loadUserInfo();
 
       // 登出按钮事件
       const logoutBtn = document.getElementById('logoutBtn');
@@ -2323,6 +2353,11 @@
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            AuthManager.clear();
+            window.location.href = '/?expired=1';
+            return;
+          }
           throw new Error('分析请求失败');
         }
 

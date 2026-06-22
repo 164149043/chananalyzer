@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Index, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Index, UniqueConstraint, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
@@ -43,8 +43,21 @@ def get_db() -> Session:
 
 
 def init_db():
-    """初始化数据库（创建所有表）"""
+    """初始化数据库（建表 + 幂等迁移）"""
     Base.metadata.create_all(bind=engine)
+    _migrate_users_credits()
+
+
+def _migrate_users_credits():
+    """幂等迁移：为已存在的 users 表补 credits 列（create_all 不会给老表加列）"""
+    insp = inspect(engine)
+    if not insp.has_table('users'):
+        return  # 全新部署：create_all 已建含 credits 的完整表
+    if 'credits' in [c['name'] for c in insp.get_columns('users')]:
+        return  # 已迁移，跳过
+    # SQLite ADD COLUMN 配 NOT NULL 必须带 DEFAULT，此处符合
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN credits INTEGER NOT NULL DEFAULT 0"))
 
 
 class KLineData(Base):
@@ -153,3 +166,56 @@ def parse_kl_type_str(kl_type_str: str) -> KL_TYPE:
         if v == kl_type_str:
             return k
     raise ValueError(f"Unknown kl_type: {kl_type_str}")
+
+
+class User(Base):
+    """用户表（注册登录）"""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(32), nullable=False, unique=True, index=True)  # 登录名
+    password_hash = Column(String(128), nullable=False)  # bcrypt 哈希
+    role = Column(String(16), nullable=False, default='user')  # 'user' | 'admin'
+    status = Column(String(16), nullable=False, default='active')  # 'active' | 'disabled'
+    credits = Column(Integer, nullable=False, default=0)  # 积分余额
+    created_at = Column(DateTime, default=datetime.now)
+    last_login_at = Column(DateTime, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'username': self.username,
+            'role': self.role,
+            'status': self.status,
+            'credits': self.credits,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
+        }
+
+
+class CreditTransaction(Base):
+    """积分变动流水（管理员调整积分时留痕）"""
+    __tablename__ = "credit_transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    admin_id = Column(Integer, nullable=False, index=True)          # 操作人(管理员 user_id)
+    target_user_id = Column(Integer, nullable=False, index=True)    # 被操作用户 id
+    delta = Column(Integer, nullable=False)                          # 变动额 +/-
+    balance_after = Column(Integer, nullable=False)                  # 变动后余额(快照)
+    reason = Column(String(255), nullable=False)                     # 变动原因
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('idx_target_user_created', 'target_user_id', 'created_at'),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'admin_id': self.admin_id,
+            'target_user_id': self.target_user_id,
+            'delta': self.delta,
+            'balance_after': self.balance_after,
+            'reason': self.reason,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
