@@ -4,10 +4,6 @@
   var API_BASE = window.location.origin + '/api';
   var TOKEN_KEY = 'chanalyzer_token';
 
-  // 积分弹窗当前目标与模式
-  var creditTarget = null;           // {id, username, credits}
-  var creditMode = 'recharge';       // 'recharge' | 'deduct'
-
   // ============ 工具 ============
 
   function getToken() { return localStorage.getItem(TOKEN_KEY); }
@@ -19,7 +15,7 @@
     return h;
   }
 
-  // XSS 防护：所有自由文本（reason / admin_username）插入前必须转义
+  // XSS 防护：所有自由文本插入前必须转义
   function escapeHtml(s) {
     if (s === null || s === undefined) return '';
     return String(s)
@@ -93,41 +89,75 @@
 
   function loadUsers() {
     var tbody = document.getElementById('usersTbody');
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="8" class="loading">加载中...</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="9" class="loading">加载中...</td></tr>';
     api('/admin/users').then(function (data) {
-      document.getElementById('userCount').textContent = '共 ' + data.total + ' 个用户';
+      var countText = '共 ' + data.total + ' 个用户';
+      if (data.pending_count > 0) countText += '，<b style="color:var(--warning,#f59e0b)">' + data.pending_count + ' 个待审核</b>';
+      document.getElementById('userCount').innerHTML = countText;
       if (!data.users || !data.users.length) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">暂无用户</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="9">暂无用户</td></tr>';
         return;
       }
       tbody.innerHTML = data.users.map(function (u) {
         var isAdmin = u.role === 'admin';
-        var statusBtn = '';
-        if (!isAdmin) {
-          statusBtn = u.status === 'active'
-            ? '<button class="act-btn disable" data-action="toggle" data-id="' + u.id + '" data-status="active">禁用</button>'
-            : '<button class="act-btn enable" data-action="toggle" data-id="' + u.id + '" data-status="disabled">启用</button>';
-        }
+        var isPending = u.status === 'pending';
         var dataName = ' data-name="' + escapeHtml(u.username) + '"';
-        var dataBal = ' data-bal="' + u.credits + '"';
-        return '<tr>' +
+        var statusBtn = '';
+        var usageBtn = '';
+        var deleteBtn = '';
+        if (!isAdmin) {
+          if (isPending) {
+            // 待审核：通过 / 拒绝
+            statusBtn =
+              '<button class="act-btn enable" data-action="approve" data-id="' + u.id + '"' + dataName + '>✓ 通过</button>' +
+              '<button class="act-btn disable" data-action="reject" data-id="' + u.id + '"' + dataName + '>✗ 拒绝</button>';
+          } else {
+            statusBtn = u.status === 'active'
+              ? '<button class="act-btn disable" data-action="toggle" data-id="' + u.id + '" data-status="active">禁用</button>'
+              : '<button class="act-btn enable" data-action="toggle" data-id="' + u.id + '" data-status="disabled">启用</button>';
+          }
+          usageBtn = '<button class="act-btn member" data-action="reset-usage" data-id="' + u.id + '"' + dataName + '>重置次数</button>';
+          deleteBtn = '<button class="act-btn danger" data-action="delete" data-id="' + u.id + '"' + dataName + '>删除</button>';
+        }
+        // 状态标签
+        var statusTag;
+        if (isAdmin) {
+          statusTag = '<span class="status-tag status-active">管理员</span>';
+        } else if (isPending) {
+          statusTag = '<span class="status-tag status-pending">⏳ 待审核</span>';
+        } else {
+          statusTag = '<span class="status-tag ' + (u.status === 'active' ? 'status-active' : 'status-disabled') + '">' + (u.status === 'active' ? '启用' : '禁用') + '</span>';
+        }
+        // AI 次数单元格
+        var usageCell;
+        if (isAdmin) {
+          usageCell = '<span class="member-perm">不限</span>';
+        } else if (u.status !== 'active') {
+          usageCell = '<span class="member-perm">-</span>';
+        } else if (u.ai_remaining === null || u.ai_remaining === undefined) {
+          usageCell = '<span class="member-perm">-</span>';
+        } else {
+          usageCell = '<span class="' + (u.ai_remaining > 0 ? 'member-active' : 'member-expired') + '">剩 ' + u.ai_remaining + '/' + u.ai_daily_limit + ' 次</span>';
+        }
+        var rowCls = isPending ? ' style="background:rgba(245,158,11,0.06)"' : '';
+        return '<tr' + rowCls + '>' +
           '<td>' + u.id + '</td>' +
           '<td class="username-cell">' + escapeHtml(u.username) + '</td>' +
+          '<td class="email-cell"' + (u.email ? ' title="' + escapeHtml(u.email) + '"' : '') + '>' + (u.email ? escapeHtml(u.email) : '<span class="no-email">未绑定</span>') + '</td>' +
           '<td><span class="role-tag ' + (isAdmin ? 'role-admin' : 'role-user') + '">' + (isAdmin ? '管理员' : '用户') + '</span></td>' +
-          '<td class="credits-cell">' + u.credits + '</td>' +
-          '<td><span class="status-tag ' + (u.status === 'active' ? 'status-active' : 'status-disabled') + '">' + (u.status === 'active' ? '启用' : '禁用') + '</span></td>' +
+          '<td>' + statusTag + '</td>' +
+          '<td class="member-cell">' + usageCell + '</td>' +
           '<td class="time-cell">' + fmtTime(u.created_at) + '</td>' +
           '<td class="time-cell">' + fmtTime(u.last_login_at) + '</td>' +
-          '<td class="actions-cell">' +
-            '<button class="act-btn recharge" data-action="recharge" data-id="' + u.id + '"' + dataName + dataBal + '>充值</button>' +
-            '<button class="act-btn deduct" data-action="deduct" data-id="' + u.id + '"' + dataName + dataBal + '>扣减</button>' +
-            '<button class="act-btn" data-action="tx" data-id="' + u.id + '"' + dataName + '>流水</button>' +
+          '<td class="actions-cell"><div class="actions-inner">' +
             statusBtn +
-          '</td>' +
+            usageBtn +
+            deleteBtn +
+          '</div></td>' +
         '</tr>';
       }).join('');
     }).catch(function (e) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">加载失败：' + escapeHtml(e.message) + '</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="9">加载失败：' + escapeHtml(e.message) + '</td></tr>';
     });
   }
 
@@ -138,14 +168,23 @@
     if (!btn) return;
     var action = btn.dataset.action;
     var id = parseInt(btn.dataset.id, 10);
-    if (action === 'recharge' || action === 'deduct') {
-      openCreditModal({
-        id: id,
-        username: btn.dataset.name,
-        credits: parseInt(btn.dataset.bal, 10),
-      }, action);
-    } else if (action === 'tx') {
-      openTxModal(id, btn.dataset.name);
+    if (action === 'approve') {
+      // 注册审核：通过（pending → active）
+      api('/admin/users/' + id + '/status', { method: 'PUT', body: { status: 'active' } })
+        .then(function () { loadUsers(); })
+        .catch(function (err) { alert(err.message); });
+    } else if (action === 'reject') {
+      // 注册审核：拒绝（pending → disabled，可再启用）
+      if (!confirm('确定拒绝用户「' + btn.dataset.name + '」的注册吗？\n拒绝后该用户无法登录，可随时再启用。')) return;
+      api('/admin/users/' + id + '/status', { method: 'PUT', body: { status: 'disabled' } })
+        .then(function () { loadUsers(); })
+        .catch(function (err) { alert(err.message); });
+    } else if (action === 'reset-usage') {
+      // 重置今日 AI 分析次数
+      if (!confirm('确定重置用户「' + btn.dataset.name + '」今日的 AI 分析次数吗？')) return;
+      api('/admin/users/' + id + '/usage/reset', { method: 'POST' })
+        .then(function () { loadUsers(); })
+        .catch(function (err) { alert(err.message); });
     } else if (action === 'toggle') {
       var cur = btn.dataset.status;           // 当前状态
       var next = cur === 'active' ? 'disabled' : 'active';
@@ -153,97 +192,17 @@
       api('/admin/users/' + id + '/status', { method: 'PUT', body: { status: next } })
         .then(function () { loadUsers(); })
         .catch(function (err) { alert(err.message); });
+    } else if (action === 'delete') {
+      if (!confirm('确定删除用户「' + btn.dataset.name + '」吗？\n此操作不可恢复，该用户的所有数据将被清除。')) return;
+      api('/admin/users/' + id, { method: 'DELETE' })
+        .then(function () { loadUsers(); })
+        .catch(function (err) { alert(err.message); });
     }
-  }
-
-  // ============ 积分弹窗（充值/扣减） ============
-
-  function openCreditModal(target, mode) {
-    creditTarget = target;
-    creditMode = mode;
-    document.getElementById('creditModalTitle').textContent = mode === 'recharge' ? '充值积分' : '扣减积分';
-    document.getElementById('creditModalSub').textContent = '目标用户：' + target.username;
-    document.getElementById('creditCurrent').textContent = target.credits;
-    document.getElementById('creditAmount').value = '';
-    document.getElementById('creditReason').value = '';
-    hideError('creditError');
-    document.getElementById('creditModal').classList.add('show');
-    setTimeout(function () { document.getElementById('creditAmount').focus(); }, 50);
-  }
-
-  function closeCreditModal() {
-    document.getElementById('creditModal').classList.remove('show');
-    creditTarget = null;
-  }
-
-  function submitCredit() {
-    if (!creditTarget) return;
-    var amountRaw = document.getElementById('creditAmount').value;
-    var reason = document.getElementById('creditReason').value.trim();
-    var amount = parseInt(amountRaw, 10);
-    hideError('creditError');
-    // 金额必须正整数（防 03、1.5、负数）
-    if (!amountRaw || isNaN(amount) || amount <= 0 || String(amount) !== amountRaw.trim()) {
-      showError('creditError', '金额必须是正整数');
-      return;
-    }
-    if (!reason) { showError('creditError', '请填写变动原因'); return; }
-    if (reason.length > 255) { showError('creditError', '原因不超过 255 字'); return; }
-
-    var delta = creditMode === 'recharge' ? amount : -amount;
-    var btn = document.getElementById('creditSubmit');
-    btn.disabled = true; btn.textContent = '提交中...';
-    api('/admin/users/' + creditTarget.id + '/credits', { method: 'POST', body: { delta: delta, reason: reason } })
-      .then(function () { closeCreditModal(); loadUsers(); })
-      .catch(function (err) { showError('creditError', err.message); })
-      .then(function () { btn.disabled = false; btn.textContent = '确认'; });
-  }
-
-  // ============ 流水弹窗 ============
-
-  function openTxModal(userId, username) {
-    document.getElementById('txModalSub').textContent = '用户：' + username;
-    document.getElementById('txTbody').innerHTML = '<tr><td colspan="5" class="loading">加载中...</td></tr>';
-    document.getElementById('txModal').classList.add('show');
-    api('/admin/credits/transactions?user_id=' + userId + '&limit=50').then(function (data) {
-      var txs = data.transactions || [];
-      if (!txs.length) {
-        document.getElementById('txTbody').innerHTML = '<tr><td colspan="5" class="tx-empty">暂无流水记录</td></tr>';
-        return;
-      }
-      document.getElementById('txTbody').innerHTML = txs.map(function (t) {
-        var cls = t.delta >= 0 ? 'tx-delta-up' : 'tx-delta-down';
-        var sign = t.delta >= 0 ? '+' : '';
-        return '<tr>' +
-          '<td class="time-cell">' + fmtTime(t.created_at) + '</td>' +
-          '<td class="' + cls + '">' + sign + t.delta + '</td>' +
-          '<td>' + t.balance_after + '</td>' +
-          '<td>' + escapeHtml(t.reason) + '</td>' +
-          '<td class="time-cell">' + escapeHtml(t.admin_username) + '</td>' +
-        '</tr>';
-      }).join('');
-    }).catch(function (e) {
-      document.getElementById('txTbody').innerHTML = '<tr><td colspan="5" class="tx-empty">加载失败：' + escapeHtml(e.message) + '</td></tr>';
-    });
   }
 
   // ============ 事件绑定 ============
 
   document.getElementById('usersTbody').addEventListener('click', onTableClick);
-  document.getElementById('creditCancel').addEventListener('click', closeCreditModal);
-  document.getElementById('creditSubmit').addEventListener('click', submitCredit);
-  document.getElementById('creditModal').addEventListener('click', function (e) {
-    if (e.target === this) closeCreditModal();
-  });
-  document.getElementById('creditReason').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') submitCredit();
-  });
-  document.getElementById('txClose').addEventListener('click', function () {
-    document.getElementById('txModal').classList.remove('show');
-  });
-  document.getElementById('txModal').addEventListener('click', function (e) {
-    if (e.target === this) this.classList.remove('show');
-  });
   document.getElementById('logoutBtn').addEventListener('click', function () {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem('chanalyzer_user_id');

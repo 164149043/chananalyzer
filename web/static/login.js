@@ -141,7 +141,7 @@
     const password = passwordInput.value;
 
     if (!username || !password) {
-      showError('请输入用户名和密码');
+      showError('请输入邮箱/用户名和密码');
       return;
     }
 
@@ -178,13 +178,20 @@
    * 页面加载时检查登录状态
    */
   document.addEventListener('DOMContentLoaded', function() {
-    // 检查是否强制显示登录页（URL 中有 force 或 logout 参数）
-    const forceLogin = getUrlParam('force') === 'true' || getUrlParam('logout') === 'true';
+    // 检查是否强制显示登录页（URL 中有 force / logout / reset 参数）
+    const forceLogin = getUrlParam('force') === 'true' || getUrlParam('logout') === 'true' || getUrlParam('reset') === '1';
 
     // 如果有 logout 参数，清除现有的登录信息
     if (getUrlParam('logout') === 'true') {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(USER_ID_KEY);
+    }
+
+    // 找回密码成功跳转过来：清旧 token（已失效）并提示用新密码登录
+    if (getUrlParam('reset') === '1') {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(USER_ID_KEY);
+      showError('密码已重置，请使用新密码登录');
     }
 
     checkLoggedIn(forceLogin);

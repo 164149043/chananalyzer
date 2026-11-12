@@ -86,14 +86,32 @@
     .users tbody tr:last-child td { border-bottom: none; }
     .users tbody tr:hover { background: rgba(255,255,255,0.02); }
     .username-cell { color: var(--text-primary); font-weight: 500; }
-    .credits-cell { color: var(--primary); font-weight: 600; font-variant-numeric: tabular-nums; }
     .role-tag, .status-tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
     .role-admin { background: rgba(200,55,46,0.15); color: var(--primary); }
     .role-user { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
     .status-active { background: rgba(34,197,94,0.15); color: var(--success); }
     .status-disabled { background: rgba(239,68,68,0.15); color: var(--error); }
     .time-cell { color: var(--text-muted); font-size: 12px; }
-    .actions-cell { display: flex; gap: 6px; }
+    .actions-cell { white-space: normal; }
+    .actions-inner { display: flex; flex-wrap: wrap; gap: 6px; }
+    .email-cell { color: var(--text-secondary); font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .no-email { color: var(--text-muted); font-style: italic; }
+    .status-pending { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
+    .member-cell { color: var(--text-secondary); font-size: 13px; line-height: 1.4; white-space: normal; }
+    .member-active { color: var(--success); font-weight: 500; }
+    .member-active small { color: var(--text-muted); font-size: 11px; font-weight: 400; }
+    .member-expired { color: var(--error); }
+    .member-perm { color: var(--text-muted); }
+    .act-btn.member { background: linear-gradient(135deg, #6366f1, #818cf8); border: none; color: #fff; }
+    .act-btn.member:hover { box-shadow: 0 6px 18px -6px rgba(99,102,241,0.5); }
+    .quick-row { display: flex; gap: 8px; margin-top: 10px; }
+    .member-quick { flex: 1; padding: 7px 0; border-radius: 8px; font-size: 12px; cursor: pointer; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-secondary); transition: all 0.2s; font-family: inherit; }
+    .member-quick:hover { color: #818cf8; border-color: #818cf8; }
+    .member-mode-tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+    .member-mode { flex: 1; padding: 9px 0; border-radius: 9px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-secondary); transition: all 0.2s; font-family: inherit; }
+    .member-mode:hover { color: var(--text-primary); border-color: var(--border-hover); }
+    .member-mode.active { background: linear-gradient(135deg, #6366f1, #818cf8); border-color: transparent; color: #fff; }
+    .member-pane { margin-bottom: 4px; }
     .act-btn { padding: 5px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-secondary); transition: all 0.2s; white-space: nowrap; font-family: inherit; }
     .act-btn:hover { color: var(--text-primary); border-color: var(--border-hover); }
     .act-btn.recharge { background: linear-gradient(135deg, var(--primary), var(--primary-hover)); border: none; color: #fff; }
@@ -101,6 +119,8 @@
     .act-btn.deduct:hover { color: var(--warning); border-color: var(--warning); }
     .act-btn.disable:hover { color: var(--error); border-color: var(--error); }
     .act-btn.enable:hover { color: var(--success); border-color: var(--success); }
+    .act-btn.danger { background: linear-gradient(135deg, #dc2626, #ef4444); border: none; color: #fff; }
+    .act-btn.danger:hover { box-shadow: 0 6px 18px -6px rgba(220,38,38,0.5); }
     .empty-row td { text-align: center; color: var(--text-muted); padding: 40px; }
 
     /* 弹窗 */
@@ -166,56 +186,17 @@
         <table class="users">
           <thead>
             <tr>
-              <th>ID</th><th>用户名</th><th>角色</th><th>积分</th>
-              <th>状态</th><th>注册时间</th><th>最后登录</th><th>操作</th>
+              <th>ID</th><th>用户名</th><th>邮箱</th><th>角色</th>
+              <th>状态</th><th>AI次数(今日)</th><th>注册时间</th><th>最后登录</th><th>操作</th>
             </tr>
           </thead>
           <tbody id="usersTbody">
-            <tr class="empty-row"><td colspan="8" class="loading">加载中...</td></tr>
+            <tr class="empty-row"><td colspan="9" class="loading">加载中...</td></tr>
           </tbody>
         </table>
       </div>
     </div>
   </main>
-
-  <!-- 积分调整弹窗（充值/扣减复用） -->
-  <div class="modal-mask" id="creditModal">
-    <div class="modal-card">
-      <div class="modal-title" id="creditModalTitle">调整积分</div>
-      <div class="modal-sub" id="creditModalSub"></div>
-      <div class="balance-line">当前积分：<b id="creditCurrent">0</b></div>
-      <div class="field">
-        <label>金额（正整数）</label>
-        <input type="number" id="creditAmount" min="1" step="1" placeholder="请输入正整数">
-      </div>
-      <div class="field">
-        <label>变动原因（必填，最多 255 字）</label>
-        <input type="text" id="creditReason" maxlength="255" placeholder="如：活动赠送 / 误充回收">
-      </div>
-      <div class="modal-error" id="creditError"></div>
-      <div class="modal-actions">
-        <button class="btn btn-cancel" id="creditCancel">取消</button>
-        <button class="btn btn-primary" id="creditSubmit">确认</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 流水弹窗 -->
-  <div class="modal-mask" id="txModal">
-    <div class="modal-card wide">
-      <div class="modal-title">积分流水</div>
-      <div class="modal-sub" id="txModalSub"></div>
-      <div class="table-wrap">
-        <table class="tx-table">
-          <thead><tr><th>时间</th><th>变动</th><th>变动后余额</th><th>原因</th><th>操作人</th></tr></thead>
-          <tbody id="txTbody"><tr><td colspan="5" class="loading">加载中...</td></tr></tbody>
-        </table>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-cancel" id="txClose">关闭</button>
-      </div>
-    </div>
-  </div>
 
   <script src="/static/admin.js"></script>
 </body>

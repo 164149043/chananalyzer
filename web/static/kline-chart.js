@@ -23,6 +23,12 @@ async function loadAndRenderKline(stockInput) {
       window.location.href = '/?expired=1';
       return;
     }
+    if (resp.status === 403) {
+      // 提示后端返回的具体原因（待审核等），并中止（不跳登录页）
+      const d = await resp.json().catch(() => ({}));
+      alert((d && d.detail) || '无权使用该功能');
+      return;
+    }
     if (!resp.ok) {
       throw new Error(`K线请求失败: HTTP ${resp.status}`);
     }

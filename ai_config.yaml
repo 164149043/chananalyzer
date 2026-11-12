@@ -33,7 +33,7 @@ analysts:
   #                         Pro/Qwen/Qwen2.5-72B-Instruct
   models:
     - Pro/deepseek-ai/DeepSeek-V3.2   # 分析师A 模型
-    - deepseek-ai/DeepSeek-V4-Flash    # 分析师B 模型
+    - deepseek-ai/DeepSeek-V4.1-Flash    # 分析师B 模型
 
   # 各分析师温度（不同温度获得多样化观点）
   temperatures: [0.3, 0.6]  # 分析师A偏保守，分析师B偏激进

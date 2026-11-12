@@ -13,6 +13,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import Header, HTTPException, Depends
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from web.security import (
@@ -28,6 +29,7 @@ load_dotenv()
 # 管理员账号配置（首启引导用，从 .env 读取）
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')  # 可选：管理员邮箱(用于邮箱登录)
 
 # 用户名校验：3-32 位字母数字下划线
 _USERNAME_RE = re.compile(r'^[A-Za-z0-9_]{3,32}$')
@@ -49,12 +51,18 @@ def validate_username(username: str) -> Optional[str]:
     return None
 
 
-def register_user(db: Session, username: str, password: str) -> User:
+def register_user(db: Session, username: str, password: str, email: Optional[str] = None) -> User:
     """
-    注册新用户
+    注册新用户（可选绑定邮箱，单事务写入）
+
+    新用户 status='pending'：可登录浏览，AI 分析与扫描功能需管理员审核通过后使用。
+
+    Args:
+        email: 注册邮箱（已小写），传入则在创建时一并绑定；并发唯一冲突会抛 IntegrityError
 
     Raises:
         HTTPException(400): 用户名格式错误 / 已存在 / 密码过短
+        IntegrityError: 并发场景下用户名/邮箱唯一约束冲突（由调用方捕获转友好提示）
     """
     err = validate_username(username)
     if err:
@@ -70,7 +78,8 @@ def register_user(db: Session, username: str, password: str) -> User:
         username=username,
         password_hash=hash_password(password),
         role='user',
-        status='active',
+        status='pending',
+        email=email,
     )
     db.add(user)
     db.commit()
@@ -79,13 +88,22 @@ def register_user(db: Session, username: str, password: str) -> User:
 
 
 def authenticate(db: Session, username: str, password: str) -> Optional[User]:
-    """验证用户名密码，返回 User 或 None；仅 status='active' 可登录"""
+    """验证 邮箱/用户名 + 密码，返回 User 或 None
+
+    仅 status='disabled' 拒绝登录；pending 可登录（浏览功能，AI/扫描由
+    usage.assert_approved 拦截）。
+    username 参数实际可为邮箱或用户名(兼容管理员账号、早期无邮箱用户)。
+    """
     if not username or not password:
         return None
-    user = db.query(User).filter(User.username == username).first()
+    account = username.strip()
+    # 邮箱(小写匹配,邮箱存储时已统一小写)或用户名(精确)任一命中
+    user = db.query(User).filter(
+        or_(User.username == account, User.email == account.lower())
+    ).first()
     if not user or not verify_password(password, user.password_hash):
         return None
-    if user.status != 'active':
+    if user.status == 'disabled':
         return None
     user.last_login_at = datetime.now()
     db.commit()
@@ -98,16 +116,35 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
 
 def ensure_admin_account(db: Session) -> None:
     """
-    首启引导 .env 管理员账号到数据库
+    引导 .env 管理员账号到数据库(startup 调用)
 
-    若 users 表无该 admin 用户则创建，保证现有管理员登录不中断。
+    admin 不存在则按 .env 创建;已存在则确保 role=admin,
+    并在 .env 的 ADMIN_PASSWORD 与库中哈希不一致时同步覆盖
+    (改 .env → 重启即用新密码生效;代价:网页端改过的 admin 密码重启后会被 .env 覆盖),
+    以及 .env 配了 ADMIN_EMAIL 且该账号尚无邮箱时补绑邮箱。
     """
     if not ADMIN_USERNAME or not ADMIN_PASSWORD:
         return
     existing = db.query(User).filter(User.username == ADMIN_USERNAME).first()
     if existing:
+        changed = False
         if existing.role != 'admin':
             existing.role = 'admin'
+            changed = True
+        # 同步密码:.env 的 ADMIN_PASSWORD 与库中哈希不一致时覆盖,
+        # 让"改 .env → 重启"对新密码立即生效
+        if not verify_password(ADMIN_PASSWORD, existing.password_hash):
+            existing.password_hash = hash_password(ADMIN_PASSWORD)
+            changed = True
+        # 补绑邮箱(若 .env 配了 ADMIN_EMAIL 且当前无邮箱,且邮箱未被他人占用)
+        if ADMIN_EMAIL and not existing.email:
+            clash = db.query(User).filter(
+                User.email == ADMIN_EMAIL, User.id != existing.id
+            ).first()
+            if not clash:
+                existing.email = ADMIN_EMAIL
+                changed = True
+        if changed:
             db.commit()
         return
     admin = User(
@@ -115,6 +152,7 @@ def ensure_admin_account(db: Session) -> None:
         password_hash=hash_password(ADMIN_PASSWORD),
         role='admin',
         status='active',
+        email=ADMIN_EMAIL or None,
     )
     db.add(admin)
     db.commit()
@@ -123,12 +161,12 @@ def ensure_admin_account(db: Session) -> None:
 # ============ Token ============
 
 def create_token(user: User) -> str:
-    """为用户签发 JWT"""
-    return create_jwt(user.id, user.role)
+    """为用户签发 JWT（携带当前 token_version，改密/找回后旧 token 立即失效）"""
+    return create_jwt(user.id, user.role, user.token_version)
 
 
 def verify_token(token: str, db: Session) -> Optional[int]:
-    """校验 token，返回 user_id(int) 或 None"""
+    """校验 token，返回 user_id(int) 或 None（disabled 用户 token 失效；pending 放行）"""
     payload = decode_jwt(token)
     if not payload:
         return None
@@ -137,7 +175,10 @@ def verify_token(token: str, db: Session) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     user = db.query(User).filter(User.id == user_id).first()
-    if not user or user.status != 'active':
+    if not user or user.status == 'disabled':
+        return None
+    # token 版本号严格比对：改密/找回后 token_version +1，该用户所有旧 token 即时失效
+    if payload.get('token_version') != user.token_version:
         return None
     return user_id
 

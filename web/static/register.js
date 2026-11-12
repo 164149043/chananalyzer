@@ -19,6 +19,8 @@
   const spinner = document.getElementById('spinner');
   const passwordToggle = document.getElementById('regPasswordToggle');
   const errorMessage = document.getElementById('errorMessage');
+  const sendCodeBtn = document.getElementById('sendCodeBtn');
+  const emailInput = document.getElementById('regEmail');
 
   let currentCaptchaId = null;
 
@@ -38,6 +40,42 @@
   }
 
   captchaImg.addEventListener('click', loadCaptcha);
+
+  // 获取邮箱验证码 + 60s 倒计时
+  let codeTimer = null;
+  sendCodeBtn.addEventListener('click', async function() {
+    hideError();
+    const email = emailInput.value.trim();
+    if (!email) { showError('请先填写邮箱'); return; }
+    sendCodeBtn.disabled = true;
+    sendCodeBtn.textContent = '发送中...';
+    try {
+      const resp = await fetch(`${API_BASE}/auth/send-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: email }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || '发送失败');
+      // 成功:进入 60s 倒计时
+      let left = 60;
+      sendCodeBtn.textContent = `${left}s 后重试`;
+      codeTimer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(codeTimer);
+          sendCodeBtn.disabled = false;
+          sendCodeBtn.textContent = '获取验证码';
+        } else {
+          sendCodeBtn.textContent = `${left}s 后重试`;
+        }
+      }, 1000);
+    } catch (e) {
+      sendCodeBtn.disabled = false;
+      sendCodeBtn.textContent = '获取验证码';
+      showError(e.message || '发送失败,请稍后重试');
+    }
+  });
 
   /**
    * 显示/隐藏密码
@@ -103,6 +141,8 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username, password,
+          email: emailInput.value.trim(),
+          code: document.getElementById('regEmailCode').value.trim(),
           captcha_id: currentCaptchaId,
           captcha_answer: captchaAnswer,
         })
@@ -125,6 +165,8 @@
 
       btnText.textContent = '注册成功！';
       await new Promise(resolve => setTimeout(resolve, 500));
+      // 新账号需管理员审核：提示后进入应用（可浏览，AI/扫描待开放）
+      alert('注册成功！账号正在等待管理员审核，审核通过后即可使用 AI 分析与扫描功能。');
       window.location.href = '/app';
 
     } catch (error) {

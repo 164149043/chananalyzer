@@ -34,12 +34,13 @@ def verify_password(plain: str, password_hash: str) -> bool:
         return False
 
 
-def create_jwt(user_id: int, role: str, expire_hours: int = TOKEN_EXPIRE_HOURS) -> str:
-    """签发 JWT，payload 含 sub(user_id)、role、iat、exp"""
+def create_jwt(user_id: int, role: str, token_version: int = 1, expire_hours: int = TOKEN_EXPIRE_HOURS) -> str:
+    """签发 JWT，payload 含 sub(user_id)、role、token_version、iat、exp"""
     now = datetime.now(timezone.utc)
     payload = {
         'sub': str(user_id),
         'role': role,
+        'token_version': token_version,
         'iat': now,
         'exp': now + timedelta(hours=expire_hours),
     }
