@@ -12,7 +12,23 @@ let _toggleState = { bi: true, seg: true, zs: true, bsp: true, fractal: true, di
 
 async function loadAndRenderKline(stockInput) {
   try {
-    const resp = await fetch(`${API_BASE}/stock/${encodeURIComponent(stockInput)}/kline?limit=500`);
+    const _token = localStorage.getItem('chanalyzer_token');
+    const resp = await fetch(`${API_BASE}/stock/${encodeURIComponent(stockInput)}/kline?limit=500`, {
+      headers: _token ? { 'Authorization': `Bearer ${_token}` } : {}
+    });
+    if (resp.status === 401) {
+      // 登录失效：清 token 跳登录页（与 AuthManager 一致）
+      localStorage.removeItem('chanalyzer_token');
+      localStorage.removeItem('chanalyzer_user_id');
+      window.location.href = '/?expired=1';
+      return;
+    }
+    if (resp.status === 403) {
+      // 提示后端返回的具体原因（待审核等），并中止（不跳登录页）
+      const d = await resp.json().catch(() => ({}));
+      alert((d && d.detail) || '无权使用该功能');
+      return;
+    }
     if (!resp.ok) {
       throw new Error(`K线请求失败: HTTP ${resp.status}`);
     }

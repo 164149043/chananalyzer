@@ -34,14 +34,31 @@ from dotenv import load_dotenv
 
 # 导入用户认证模块
 from web.auth import (
-    get_or_create_user,
-    verify_token,
-    create_session_token,
+    get_current_user,
+    get_current_admin,
     get_user_cache_file,
     get_user_status_file,
-    get_current_user,
-    verify_credentials
+    verify_token,
+    create_token,
+    register_user,
+    authenticate,
+    get_user_by_id,
+    ensure_admin_account,
+    MIN_PASSWORD_LENGTH,
 )
+from web.captcha import generate_captcha, verify_captcha
+from web.security import TOKEN_EXPIRE_HOURS, hash_password
+from sqlalchemy.exc import IntegrityError
+
+from ChanAnalyzer.database import init_db, get_db, User, VerificationCode
+from web.usage import (
+    assert_approved,
+    consume_ai_usage,
+    refund_ai_usage,
+    reset_ai_usage,
+    AI_DAILY_LIMIT,
+)
+from web.mail import validate_email, send_mail_code, send_mail
 
 # 添加项目路径
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -117,6 +134,121 @@ if static_dir.exists():
             return FileResponse(index_file)
         return RedirectResponse(url="/static/index.html", status_code=302)
 
+    @app.get("/register")
+    async def register_page():
+        """注册页面"""
+        register_file = static_dir / "register.html"
+        if register_file.exists():
+            return FileResponse(register_file)
+        return RedirectResponse(url="/static/register.html", status_code=302)
+
+    @app.get("/admin")
+    async def admin_page():
+        """管理员后台页面"""
+        admin_file = static_dir / "admin.html"
+        if admin_file.exists():
+            return FileResponse(admin_file)
+        return RedirectResponse(url="/static/admin.html", status_code=302)
+
+    @app.get("/forgot")
+    async def forgot_page():
+        """找回密码页面"""
+        forgot_file = static_dir / "forgot.html"
+        if forgot_file.exists():
+            return FileResponse(forgot_file)
+        return RedirectResponse(url="/static/forgot.html", status_code=302)
+
+
+@app.on_event("startup")
+def _startup_init():
+    """启动时初始化数据库表 + 引导管理员账号（users 表必须在首次请求前创建）"""
+    init_db()
+    with get_db() as db:
+        ensure_admin_account(db)
+
+
+# ============ 管理员后台 API（/api/admin/*，均需 admin 权限）============
+
+class StatusUpdateRequest(BaseModel):
+    status: str
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(admin_id: int = Depends(get_current_admin)):
+    """列出所有用户（待审核排最前，其余按注册时间倒序）"""
+    with get_db() as db:
+        users = db.query(User).all()
+        # pending 最前（新的在前）→ 其余按注册时间倒序
+        pending = [u for u in users if u.status == 'pending']
+        pending.sort(key=lambda u: u.created_at or datetime.min, reverse=True)
+        others = [u for u in users if u.status != 'pending']
+        others.sort(key=lambda u: u.created_at or datetime.min, reverse=True)
+        ordered = pending + others
+        return {
+            "users": [u.to_dict() for u in ordered],
+            "total": len(ordered),
+            "pending_count": len(pending),
+        }
+
+
+@app.put("/api/admin/users/{user_id}/status")
+async def admin_update_status(
+    user_id: int,
+    req: StatusUpdateRequest,
+    admin_id: int = Depends(get_current_admin),
+):
+    """
+    设置用户状态（禁用后该用户 token 即时失效）
+
+    兼做注册审核：pending → active 即"通过"，pending → disabled 即"拒绝"。
+    """
+    if req.status not in ('active', 'disabled'):
+        raise HTTPException(status_code=400, detail="status 必须为 active 或 disabled")
+
+    with get_db() as db:
+        target = db.query(User).filter(User.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        # 防止自禁用（误锁自己）
+        if user_id == admin_id and req.status == 'disabled':
+            raise HTTPException(status_code=400, detail="不能禁用自己的账号")
+        # 防止禁用任何 admin（互相锁死，兜底靠 .env 重建）
+        if target.role == 'admin' and req.status == 'disabled':
+            raise HTTPException(status_code=400, detail="不能禁用管理员账号")
+        target.status = req.status
+        db.commit()
+        db.refresh(target)
+        return {"user_id": user_id, "status": target.status}
+
+
+@app.post("/api/admin/users/{user_id}/usage/reset")
+async def admin_reset_usage(user_id: int, admin_id: int = Depends(get_current_admin)):
+    """管理员重置某用户今日 AI 分析用量（剩余次数恢复为每日上限）"""
+    with get_db() as db:
+        reset_ai_usage(db, user_id)
+    return {"ok": True, "user_id": user_id, "ai_daily_limit": AI_DAILY_LIMIT}
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(user_id: int, admin_id: int = Depends(get_current_admin)):
+    """删除用户(硬删除)。禁止删自己 / 删管理员;同时清理该用户的扫描缓存文件。"""
+    with get_db() as db:
+        target = db.query(User).filter(User.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if user_id == admin_id:
+            raise HTTPException(status_code=400, detail="不能删除自己")
+        if target.role == 'admin':
+            raise HTTPException(status_code=400, detail="不能删除管理员账号")
+        username = target.username
+        # 清理该用户的扫描缓存与状态文件(不存在则跳过)
+        for scan_type in ('buy', 'sell'):
+            get_user_cache_file(user_id, scan_type).unlink(missing_ok=True)
+            get_user_status_file(user_id, scan_type).unlink(missing_ok=True)
+        db.delete(target)
+        db.commit()
+        return {"ok": True, "deleted_id": user_id, "username": username}
+
 
 @app.get("/api/health")
 async def health_check():
@@ -138,42 +270,47 @@ async def ping():
 
 # ============ 用户认证 API ============
 
+def _extract_token(authorization: str) -> str:
+    """从 Authorization 头提取 token"""
+    if not authorization:
+        return ""
+    return authorization[7:] if authorization.startswith("Bearer ") else authorization
+
+
 @app.get("/api/auth/session")
 async def get_session(authorization: str = Header(None)):
     """
-    获取或创建用户会话
-
-    返回用户的token和user_id
+    校验当前 token 并返回用户信息（强制登录：无效则 401）
     """
-    token = authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization
-    token, user_id = get_or_create_user(token)
-
+    token = _extract_token(authorization)
+    with get_db() as db:
+        user_id = verify_token(token, db)
+        user = get_user_by_id(db, user_id) if user_id else None
+        user_data = user.to_dict() if user else None
+    if not user_data:
+        raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
     return {
         "token": token,
         "user_id": user_id,
-        "expire_hours": 24
+        "user": user_data,
+        "expire_hours": TOKEN_EXPIRE_HOURS,
     }
 
 
 @app.post("/api/auth/refresh")
 async def refresh_session(authorization: str = Header(None)):
-    """
-    刷新用户会话
-    """
-    token = authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization
-    user_id = verify_token(token)
-
-    if not user_id:
-        # Token无效，创建新会话
-        token, user_id = get_or_create_user(None)
-    else:
-        # Token有效，刷新它
-        token, user_id = create_session_token(user_id)
-
+    """刷新 token（重新签发）"""
+    token = _extract_token(authorization)
+    with get_db() as db:
+        user_id = verify_token(token, db)
+        user = get_user_by_id(db, user_id) if user_id else None
+        if not user:
+            raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
+        new_token = create_token(user)
     return {
-        "token": token,
+        "token": new_token,
         "user_id": user_id,
-        "expire_hours": 24
+        "expire_hours": TOKEN_EXPIRE_HOURS,
     }
 
 
@@ -182,30 +319,232 @@ async def login(request: Request):
     """
     用户登录验证
 
-    请求体:
-        username: 用户名
-        password: 密码
-
-    返回:
-        token: 会话令牌
-        user_id: 用户ID
-        expire_hours: 过期时间（小时）
+    请求体: { username, password }
+    返回: { token, user_id, user, expire_hours }
     """
     data = await request.json()
-    username = data.get('username', '')
+    username = (data.get('username') or '').strip()
     password = data.get('password', '')
 
-    if not verify_credentials(username, password):
-        raise HTTPException(status_code=401, detail="账号或密码错误")
-
-    # 验证成功，创建会话
-    token, user_id = create_session_token(None)
-
+    with get_db() as db:
+        user = authenticate(db, username, password)
+        if not user:
+            raise HTTPException(status_code=401, detail="账号或密码错误")
+        token = create_token(user)
+        user_data = user.to_dict()
     return {
         "token": token,
-        "user_id": user_id,
-        "expire_hours": 24
+        "user_id": user_data["id"],
+        "user": user_data,
+        "expire_hours": TOKEN_EXPIRE_HOURS,
     }
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email: str
+    code: str               # 邮箱验证码
+    captcha_id: str
+    captcha_answer: str
+
+
+class SendCodeRequest(BaseModel):
+    target: str             # 邮箱
+    purpose: str = "register"  # register=注册  reset=找回密码
+
+
+@app.post("/api/auth/send-code")
+async def send_code(req: SendCodeRequest, request: Request):
+    """
+    发送邮箱验证码(注册 / 找回密码)
+
+    频率限制:同邮箱 60s 内一次;同 IP 每天最多 10 次。
+    请求体: { target }
+    """
+    email = validate_email(req.target)
+    ip = request.client.host if request.client else ''
+    now = datetime.now()
+    with get_db() as db:
+        # 同邮箱 60s 内只能发一次
+        recent = db.query(VerificationCode).filter(
+            VerificationCode.target == email,
+            VerificationCode.created_at > now - timedelta(seconds=60),
+        ).first()
+        if recent:
+            raise HTTPException(status_code=429, detail="请求过于频繁,请 60 秒后重试")
+        # 同 IP 每天最多 10 次(防邮件轰炸)
+        ip_count = db.query(VerificationCode).filter(
+            VerificationCode.ip == ip,
+            VerificationCode.created_at > now - timedelta(days=1),
+        ).count()
+        if ip_count >= 10:
+            raise HTTPException(status_code=429, detail="今日请求次数过多,请明天再试")
+        # 注册:邮箱已注册→拒;找回:邮箱未注册→拒
+        registered = db.query(User).filter(User.email == email).first()
+        if req.purpose == 'register':
+            if registered:
+                raise HTTPException(status_code=400, detail="该邮箱已注册,请直接登录")
+        elif req.purpose == 'reset':
+            if not registered:
+                raise HTTPException(status_code=400, detail="该邮箱未注册")
+        else:
+            raise HTTPException(status_code=400, detail="无效的验证码用途")
+        code = f"{random.randint(0, 999999):06d}"
+        db.add(VerificationCode(
+            target=email, code=code, purpose=req.purpose,
+            expires_at=now + timedelta(minutes=5), ip=ip,
+        ))
+        db.commit()
+    # 在事务外发送(SMTP 较慢);失败则删除刚写入的记录,解除 60s 限制让用户可立即重试
+    try:
+        send_mail_code(email, code)
+    except HTTPException:
+        with get_db() as db:
+            db.query(VerificationCode).filter(
+                VerificationCode.target == email, VerificationCode.code == code
+            ).delete()
+            db.commit()
+        raise
+    return {"ok": True, "message": "验证码已发送,请查收(注意垃圾邮件箱)"}
+
+
+@app.post("/api/auth/register")
+async def register(req: RegisterRequest):
+    """
+    用户注册(邮箱验证码 + 图形验证码双重校验)
+
+    请求体: { username, password, email, code, captcha_id, captcha_answer }
+    返回: { token, user_id, user, expire_hours }
+    """
+    if not verify_captcha(req.captcha_id, req.captcha_answer):
+        raise HTTPException(status_code=400, detail="图形验证码错误或已失效")
+    email = validate_email(req.email)
+    code = (req.code or '').strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="请输入邮箱验证码")
+    with get_db() as db:
+        # 邮箱唯一
+        if db.query(User).filter(User.email == email).first():
+            raise HTTPException(status_code=400, detail="该邮箱已注册")
+        # 校验验证码:匹配 + 未过期 + 未使用
+        rec = db.query(VerificationCode).filter(
+            VerificationCode.target == email,
+            VerificationCode.code == code,
+            VerificationCode.purpose == 'register',
+            VerificationCode.used.is_(False),
+        ).order_by(VerificationCode.created_at.desc()).first()
+        if not rec:
+            raise HTTPException(status_code=400, detail="邮箱验证码错误")
+        if rec.expires_at < datetime.now():
+            raise HTTPException(status_code=400, detail="验证码已过期,请重新获取")
+        # 创建用户(带邮箱,单事务写入);并发唯一冲突 → 友好 400
+        try:
+            user = register_user(db, req.username.strip(), req.password, email=email)
+        except IntegrityError:
+            db.rollback()
+            if db.query(User).filter(User.email == email).first():
+                raise HTTPException(status_code=400, detail="该邮箱已注册")
+            if db.query(User).filter(User.username == req.username.strip()).first():
+                raise HTTPException(status_code=400, detail="用户名已存在")
+            raise HTTPException(status_code=400, detail="注册失败,请重试")
+        # 用户创建成功后才作废验证码(避免"没注册成功但验证码作废")
+        rec.used = True
+        db.commit()
+        token = create_token(user)
+        user_data = user.to_dict()
+    # 通知管理员审核（开关 REGISTER_NOTIFY_EMAIL + ADMIN_EMAIL；失败不影响注册结果）
+    notify_to = os.getenv('REGISTER_NOTIFY_EMAIL', '').strip()
+    admin_email = os.getenv('ADMIN_EMAIL', '').strip()
+    if notify_to.lower() in ('true', '1', 'yes') and admin_email:
+        try:
+            send_mail(
+                admin_email,
+                "【缠论分析】新用户注册待审核",
+                (
+                    f"新用户 {user_data['username']} ({user_data['email']}) 已完成注册，\n"
+                    f"正在等待审核。请登录管理后台 /admin 处理。"
+                ),
+            )
+        except Exception as e:
+            print(f"[register] 注册通知邮件发送失败: {e}")
+    return {
+        "token": token,
+        "user_id": user_data["id"],
+        "user": user_data,
+        "expire_hours": TOKEN_EXPIRE_HOURS,
+    }
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
+    captcha_id: str
+    captcha_answer: str
+
+
+@app.post("/api/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    """
+    找回密码:图形验证码 + 邮箱验证码双重校验后重置密码
+
+    重置成功后该账号所有旧 token 立即失效(token_version + 1),需用新密码重新登录。
+    """
+    if not verify_captcha(req.captcha_id, req.captcha_answer):
+        raise HTTPException(status_code=400, detail="图形验证码错误或已失效")
+    email = validate_email(req.email)
+    code = (req.code or '').strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="请输入邮箱验证码")
+    if not req.new_password or len(req.new_password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(status_code=400, detail=f"密码至少 {MIN_PASSWORD_LENGTH} 位")
+    with get_db() as db:
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            raise HTTPException(status_code=400, detail="该邮箱未注册")
+        # 校验验证码:purpose=reset + 匹配 + 未过期 + 未使用
+        rec = db.query(VerificationCode).filter(
+            VerificationCode.target == email,
+            VerificationCode.code == code,
+            VerificationCode.purpose == 'reset',
+            VerificationCode.used.is_(False),
+        ).order_by(VerificationCode.created_at.desc()).first()
+        if not rec:
+            raise HTTPException(status_code=400, detail="邮箱验证码错误")
+        if rec.expires_at < datetime.now():
+            raise HTTPException(status_code=400, detail="验证码已过期,请重新获取")
+        # 改密码 + token_version+1(作废所有旧 token)+ 验证码置 used
+        user.password_hash = hash_password(req.new_password)
+        user.token_version = (user.token_version or 0) + 1
+        rec.used = True
+        db.commit()
+    return {"ok": True, "message": "密码已重置,请用新密码登录"}
+
+
+@app.get("/api/auth/me")
+async def get_me(user_id: int = Depends(get_current_user)):
+    """获取当前登录用户信息"""
+    with get_db() as db:
+        user = get_user_by_id(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        return user.to_dict()
+
+
+@app.post("/api/auth/logout")
+async def logout(user_id: int = Depends(get_current_user)):
+    """登出（JWT 无状态，前端清除 token 即可）"""
+    return {"ok": True}
+
+
+@app.get("/api/auth/captcha")
+async def get_captcha():
+    """生成图形验证码，返回 base64 图片与 captcha_id"""
+    import base64
+    captcha_id, png_bytes = generate_captcha()
+    b64 = base64.b64encode(png_bytes).decode('ascii')
+    return {"captcha_id": captcha_id, "image": f"data:image/png;base64,{b64}"}
 
 
 # ============ 数据缓存管理 ============
@@ -825,6 +1164,10 @@ async def start_buy_scan(
 
     每个用户的扫描任务独立执行，结果隔离存储
     """
+    # 审核校验（未通过审核直接 403，不进入 busy/并发检查）
+    with get_db() as db:
+        assert_approved(db, user_id)
+
     # 检查用户是否已有正在进行的扫描
     user_status = get_user_scan_status(user_id, 'buy')
     if user_status.get('scanning', False):
@@ -857,6 +1200,10 @@ async def start_sell_scan(
     """
     启动卖点扫描任务（多用户支持）
     """
+    # 审核校验（未通过审核直接 403，不进入 busy/并发检查）
+    with get_db() as db:
+        assert_approved(db, user_id)
+
     # 检查用户是否已有正在进行的扫描
     user_status = get_user_scan_status(user_id, 'sell')
     if user_status.get('scanning', False):
@@ -988,7 +1335,8 @@ async def start_hot_scan(
     """
     启动热门股票扫描
 
-    先按排名类型获取热门股票，然后对这些股票执行买点扫描
+    先按排名类型获取热门股票，然后对这些股票执行买点扫描。
+    登录即可用，无审核限制（拉取排行榜，无 AI/缠论计算成本）。
     """
     user_status = get_user_scan_status(user_id, 'buy')
     if user_status.get('scanning', False):
@@ -1143,10 +1491,10 @@ async def get_areas():
 
 
 @app.get("/api/stock/{code}/signals")
-async def get_stock_signals(code: str):
+async def get_stock_signals(code: str, user_id: int = Depends(get_current_user)):
     """获取指定股票的买卖点摘要（使用 ChanAnalyzer 单日线分析）
 
-    支持股票代码或名称输入（模糊匹配）
+    支持股票代码或名称输入（模糊匹配）。登录即可用，无审核/次数限制。
     """
     # 解析股票代码/名称
     resolved_code, resolved_name, success = resolve_stock_code(code)
@@ -1229,10 +1577,10 @@ async def get_stock_signals(code: str):
 
 
 @app.get("/api/stock/{code}/kline")
-async def get_stock_kline(code: str, limit: int = 500):
+async def get_stock_kline(code: str, limit: int = 500, user_id: int = Depends(get_current_user)):
     """获取K线原始数据 + 缠论标记（笔/线段/中枢/买卖点）
 
-    支持股票代码或名称输入（模糊匹配）
+    支持股票代码或名称输入（模糊匹配）。登录即可用，无审核/次数限制。
     """
     resolved_code, resolved_name, success = resolve_stock_code(code)
     if not success:
@@ -1242,7 +1590,7 @@ async def get_stock_kline(code: str, limit: int = 500):
         limit = max(50, min(limit, 3000))
 
         # 从数据库查询原始K线
-        from ChanAnalyzer.database import get_db, KLineData
+        from ChanAnalyzer.database import KLineData
         with get_db() as db:
             query = db.query(KLineData).filter(
                 KLineData.code == resolved_code,
@@ -1378,7 +1726,8 @@ class AnalyzeRequest(BaseModel):
     temperatures: Optional[Dict[str, float]] = None
 
 
-async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None):
+async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None,
+                               user_id: Optional[int] = None, charged: bool = False):
     """
     流式输出分析结果 (SSE) - 纯异步实现
 
@@ -1388,6 +1737,8 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
     Args:
         code: 股票代码或名称（支持模糊匹配）
         temperatures: 温度配置 {analyst_a: 0.3, analyst_b: 0.6, decision_maker: 0.3}
+        user_id: 调用者 id（用于失败返还次数）
+        charged: 本次是否已预扣次数（admin 未扣则不返还）
     """
     import time
     tasks: List[asyncio.Task] = []
@@ -1499,6 +1850,19 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
         await asyncio.gather(task_a, task_b, return_exceptions=True)
         tasks.clear()
 
+        # 两位分析师都失败时，拿空意见调决策者没有意义，直接结束；
+        # 服务端失败不该由用户买单，回退本次预扣的次数（客户端断开走不到这里，不返还）
+        if not analyst_opinions[0] and not analyst_opinions[1]:
+            if charged and user_id is not None:
+                try:
+                    with get_db() as db:
+                        refund_ai_usage(db, user_id)
+                except Exception as e:
+                    print(f"[refund] 回退 AI 次数失败: {e}")
+            yield f"data: {json.dumps({'event': 'error', 'message': '两位分析师均分析失败，请稍后重试'})}\n\n"
+            yield f"data: {json.dumps({'event': 'complete', 'status': 'error'})}\n\n"
+            return
+
         # ========== 阶段2：流式调用决策者 ==========
         yield f"data: {json.dumps({'event': 'decision_start'})}\n\n"
 
@@ -1594,7 +1958,7 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None)
 
 
 @app.post("/api/stock/analyze")
-async def analyze_stock(request: AnalyzeRequest):
+async def analyze_stock(request: AnalyzeRequest, user_id: int = Depends(get_current_user)):
     """
     个股分析接口 (SSE 流式输出)
 
@@ -1607,13 +1971,34 @@ async def analyze_stock(request: AnalyzeRequest):
             "decision_maker": 0.3
         }
     }
+
+    普通用户每日 AI_DAILY_LIMIT 次（进入即预扣，双分析师全失败自动返还），admin 不限量。
     """
+    # 审核校验 + 每日次数预扣（任一失败直接 403 JSON，SSE 不会建立）
+    charged = False
+    with get_db() as db:
+        assert_approved(db, user_id)
+        user = get_user_by_id(db, user_id)
+        if user and user.role != 'admin':
+            if not consume_ai_usage(db, user_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"今日 {AI_DAILY_LIMIT} 次 AI 分析已用完，明日自动重置",
+                )
+            charged = True
+
     return StreamingResponse(
         stream_analyze_stock(
             code=request.code,
-            temperatures=request.temperatures
+            temperatures=request.temperatures,
+            user_id=user_id,
+            charged=charged,
         ),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",        # 禁止代理/浏览器缓存事件流
+            "X-Accel-Buffering": "no",          # 禁止 nginx 反代缓冲（否则 SSE 会一次性吐出）
+        },
     )
 
 

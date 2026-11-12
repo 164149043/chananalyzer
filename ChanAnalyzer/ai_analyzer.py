@@ -143,6 +143,66 @@ class AIAnalyzer:
 
         return "\n".join(lines)
 
+    # 缠论买卖点类型 -> 中文
+    _BS_TYPE_NAME = {"1": "一买", "1p": "类一买", "2": "二买", "2s": "类二买", "3a": "三买A", "3b": "三买B"}
+
+    def _map_bs_type(self, type_str: str, is_buy: bool) -> str:
+        """买卖点类型串('1,1p')转中文('一买|类一买')，卖点将'买'替换为'卖'"""
+        names = []
+        for t in str(type_str).split(","):
+            t = t.strip()
+            if not t:
+                continue
+            name = self._BS_TYPE_NAME.get(t)
+            if name is None:
+                names.append(t)
+            else:
+                names.append(name if is_buy else name[:-1] + "卖")
+        return "|".join(names) if names else "-"
+
+    def _attach_signals(self, signals: List[Dict], start_date: str, end_date: str) -> str:
+        """按日期区间把买卖点内联标注到笔/线段上，返回'|'分隔的中文标签"""
+        tags = [
+            self._map_bs_type(s['type'], s['is_buy'])
+            for s in signals
+            if start_date <= s.get('date', '') <= end_date
+        ]
+        return "|".join(tags) if tags else "-"
+
+    def _bi_divergence_tag(self, bi_list: List[Dict], idx: int) -> str:
+        """
+        同向笔 MACD 背驰简化判断：
+        与前一根同向笔比较，价格创新高/新低而 MACD 柱绝对值明显萎缩(90%以下)，标注疑似背驰。
+        笔在 bi_list 中交替出现，同向笔索引间隔为 2。
+        """
+        bi = bi_list[idx]
+        macd = bi.get('macd')
+        if macd is None:
+            return "-"
+        for j in range(idx - 2, -1, -2):
+            prev = bi_list[j]
+            if prev.get('macd') is None:
+                continue
+            if prev['dir'] != bi['dir']:
+                break  # 防御：数据非交替时直接放弃
+            price_stronger = (
+                bi['end_price'] > prev['end_price'] if bi['dir'] == '向上'
+                else bi['end_price'] < prev['end_price']
+            )
+            macd_weaker = abs(macd) < abs(prev['macd']) * 0.9
+            if price_stronger and macd_weaker:
+                return "疑似顶背驰" if bi['dir'] == '向上' else "疑似底背驰"
+            return "-"
+        return "-"
+
+    def _zs_relation(self, prev: Dict, last: Dict) -> str:
+        """最新两中枢的位置关系（缠论趋势判断依据）"""
+        if prev['high'] < last['low']:
+            return "上涨趋势（中枢依次上移，无重叠）"
+        if prev['low'] > last['high']:
+            return "下跌趋势（中枢依次下移，无重叠）"
+        return "中枢扩展/震荡（两中枢区间重叠）"
+
     def _format_level(self, level: Dict[str, Any], level_num: int = 1, skip_current_price: bool = False, realtime_quote: Optional[Dict[str, Any]] = None) -> List[str]:
         """格式化单级别数据"""
         lines = []
@@ -207,97 +267,80 @@ class AIAnalyzer:
             lines.append(f"- 距低点: {kline_range['dist_low_pct']:+.2f}%")
             lines.append("")
 
-        # 买卖点
-        buy_signals = level.get('buy_signals', [])
-        sell_signals = level.get('sell_signals', [])
+        # 买卖点信号（用于内联标注与近期信号列表）
+        all_signals = sorted(
+            level.get('buy_signals', []) + level.get('sell_signals', []),
+            key=lambda s: s.get('date', ''),
+        )
 
-        lines.append("**买卖点统计**:")
-        lines.append(f"- 买入点: {len(buy_signals)} 个")
-        lines.append(f"- 卖出点: {len(sell_signals)} 个")
-
-        # 最近买入点详情
-        if buy_signals:
-            lines.append("")
-            lines.append(f"**买入点明细** (共{len(buy_signals)}个):")
-            for bs in buy_signals:
-                bs_type = bs.get('type', 'Unknown')
-                date = bs.get('date', '')
-                price = bs.get('price', 0)
-                lines.append(f"  - {bs_type}: {date} @ {price:.2f}")
-
-        # 最近卖出点详情
-        if sell_signals:
-            lines.append("")
-            lines.append(f"**卖出点明细** (共{len(sell_signals)}个):")
-            for bs in sell_signals:
-                bs_type = bs.get('type', 'Unknown')
-                date = bs.get('date', '')
-                price = bs.get('price', 0)
-                lines.append(f"  - {bs_type}: {date} @ {price:.2f}")
-        lines.append("")
-
-        # 笔
+        # 笔结构表（最新9条，内联算法检测的买卖点与背驰标注）
         bi_list = level.get('bi_list', [])
         if bi_list:
-            lines.append(f"**笔列表** (最近20个，共{len(bi_list)}个):")
-            for bi in bi_list[-20:]:
-                direction = bi['dir']
-                start_date = bi['start_date']
-                end_date = bi['end_date']
-                start_price = bi['start_price']
-                end_price = bi['end_price']
+            show_cnt = min(9, len(bi_list))
+            lines.append(f"**笔结构** (最新{show_cnt}条，共{len(bi_list)}条):")
+            lines.append("")
+            lines.append("| 起始日期 | 结束日期 | 方向 | 起止价格 | 涨跌幅 | 确认状态 | 买卖点 | 背驰标注 |")
+            lines.append("|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|")
+            for i in range(len(bi_list) - show_cnt, len(bi_list)):
+                bi = bi_list[i]
+                sig = self._attach_signals(all_signals, bi['start_date'], bi['end_date'])
+                div = self._bi_divergence_tag(bi_list, i)
+                change_pct = ((bi['end_price'] - bi['start_price']) / bi['start_price'] * 100) if bi['start_price'] > 0 else 0
                 sure = "已确认" if bi.get('is_sure') else "未确认"
-
-                # 计算涨跌幅
-                change_pct = ((end_price - start_price) / start_price * 100) if start_price > 0 else 0
-                change_str = f"({change_pct:+.2f}%)"
-
-                lines.append(f"  - {direction}: {start_date} -> {end_date}, "
-                           f"{start_price:.2f} -> {end_price:.2f} {change_str} ({sure})")
+                lines.append(
+                    f"| {bi['start_date']} | {bi['end_date']} | {bi['dir']} "
+                    f"| {bi['start_price']:.2f} -> {bi['end_price']:.2f} "
+                    f"| {change_pct:+.2f}% | {sure} | {sig} | {div} |"
+                )
             lines.append("")
 
-        # 线段
+        # 线段结构表（最新3条，内联买卖点）
         seg_list = level.get('seg_list', [])
         if seg_list:
-            lines.append(f"**线段列表** (最近20个，共{len(seg_list)}个):")
-            for seg in seg_list[-20:]:
-                direction = seg['dir']
-                start_date = seg['start_date']
-                end_date = seg['end_date']
-                start_price = seg['start_price']
-                end_price = seg['end_price']
-                bi_count = seg['bi_count']
+            show_cnt = min(3, len(seg_list))
+            lines.append(f"**线段结构** (最新{show_cnt}条，共{len(seg_list)}条):")
+            lines.append("")
+            lines.append("| 起始日期 | 结束日期 | 方向 | 起止价格 | 涨跌幅 | 笔数 | 确认状态 | 买卖点 |")
+            lines.append("|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|")
+            for seg in seg_list[-3:]:
+                sig = self._attach_signals(all_signals, seg['start_date'], seg['end_date'])
+                change_pct = ((seg['end_price'] - seg['start_price']) / seg['start_price'] * 100) if seg['start_price'] > 0 else 0
                 sure = "已确认" if seg.get('is_sure') else "未确认"
-
-                change_pct = ((end_price - start_price) / start_price * 100) if start_price > 0 else 0
-                change_str = f"({change_pct:+.2f}%)"
-
-                lines.append(f"  - {direction}: {start_date} -> {end_date}, "
-                           f"{start_price:.2f} -> {end_price:.2f} {change_str} "
-                           f"({bi_count}笔, {sure})")
+                lines.append(
+                    f"| {seg['start_date']} | {seg['end_date']} | {seg['dir']} "
+                    f"| {seg['start_price']:.2f} -> {seg['end_price']:.2f} "
+                    f"| {change_pct:+.2f}% | {seg.get('bi_count', '-')} | {sure} | {sig} |"
+                )
             lines.append("")
 
-        # 中枢
+        # 中枢（最新2个）+ 位置关系预计算
         zs_list = level.get('zs_list', [])
         if zs_list:
-            show_zs = zs_list[-15:] if len(zs_list) > 15 else zs_list
-            lines.append(f"**中枢列表** (最近{len(show_zs)}个，共{len(zs_list)}个):")
+            show_zs = zs_list[-2:]
+            if len(zs_list) >= 2:
+                relation = self._zs_relation(zs_list[-2], zs_list[-1])
+                lines.append(f"**中枢结构** (最新{len(show_zs)}个，共{len(zs_list)}个) · 最新两中枢位置关系: **{relation}**")
+            else:
+                lines.append("**中枢结构** (目前仅1个中枢)")
+            lines.append("")
+            lines.append("| 起始日期 | 结束日期 | 区间高点ZG | 区间低点ZD | 极值高点GG | 极值低点DD | 中枢中位 | 笔数 |")
+            lines.append("|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|")
             for zs in show_zs:
-                zs_idx = zs['idx']
-                start_date = zs['start_date']
-                end_date = zs['end_date']
-                low = zs['low']
-                high = zs['high']
-                center = zs['center']
-                bi_count = zs['bi_count']
+                lines.append(
+                    f"| {zs['start_date']} | {zs['end_date']} "
+                    f"| {zs['high']:.2f} | {zs['low']:.2f} "
+                    f"| {zs.get('peak_high', zs['high']):.2f} | {zs.get('peak_low', zs['low']):.2f} "
+                    f"| {zs['center']:.2f} | {zs['bi_count']} |"
+                )
+            lines.append("")
 
-                # 计算中枢宽度
-                width = high - low
-                width_pct = (width / center * 100) if center > 0 else 0
-
-                lines.append(f"  - 中枢{zs_idx}: {start_date} -> {end_date}, "
-                           f"区间 [{low:.2f}, {high:.2f}], "
-                           f"中心 {center:.2f}, 宽度 {width:.2f}({width_pct:.2f}%), {bi_count}笔")
+        # 近期买卖点信号（算法检测，客观事实）
+        if all_signals:
+            recent = all_signals[-5:]
+            lines.append(f"**近期买卖点信号** (算法检测的客观事实，最新{len(recent)}个):")
+            for s in recent:
+                lines.append(f"  - {self._map_bs_type(s.get('type', ''), s.get('is_buy', True))}: "
+                             f"{s.get('date', '')} @ {s.get('price', 0):.2f}")
             lines.append("")
 
         # 中枢位置

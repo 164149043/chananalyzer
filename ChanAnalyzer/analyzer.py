@@ -205,6 +205,8 @@ class ChanAnalyzer:
                 "high": zs.high,
                 "low": zs.low,
                 "center": zs.mid,
+                "peak_high": zs.peak_high,
+                "peak_low": zs.peak_low,
                 "bi_count": zs.end_bi.idx - zs.begin_bi.idx + 1,
             })
 

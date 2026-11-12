@@ -869,84 +869,6 @@
       line-height: 1.6;
     }
 
-    /* === 设置页面 === */
-    .setting-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: var(--space-md) 0;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .setting-item:last-child {
-      border-bottom: none;
-    }
-
-    .setting-label {
-      font-size: 0.95rem;
-      color: var(--text-primary);
-    }
-
-    .setting-desc {
-      font-size: 0.8rem;
-      color: var(--text-tertiary);
-      margin-top: var(--space-xs);
-    }
-
-    .setting-control {
-      display: flex;
-      align-items: center;
-      gap: var(--space-md);
-    }
-
-    /* 开关组件 */
-    .toggle-switch {
-      position: relative;
-      width: 48px;
-      height: 26px;
-    }
-
-    .toggle-switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-
-    .toggle-slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-medium);
-      border-radius: 13px;
-      transition: all 0.2s ease;
-    }
-
-    .toggle-slider::before {
-      position: absolute;
-      content: '';
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background: var(--text-tertiary);
-      border-radius: 50%;
-      transition: all 0.2s ease;
-    }
-
-    .toggle-switch input:checked + .toggle-slider {
-      background: var(--zhu-red);
-      border-color: var(--zhu-red);
-    }
-
-    .toggle-switch input:checked + .toggle-slider::before {
-      transform: translateX(22px);
-      background: white;
-    }
-
     /* === K线图控制按钮 === */
     .kline-controls {
       display: flex;
@@ -1269,6 +1191,11 @@
     <!-- 顶部导航 -->
     <header class="top-nav">
       <div class="app-logo">缠论分析</div>
+      <div class="user-info" id="userInfo" style="display:none; margin-left:auto; color:#a0a0a0; font-size:13px; margin-right:14px; align-self:center;">
+        <span id="userName"></span>
+        <span id="memberBadge" style="margin-left:10px;"></span>
+      </div>
+      <a id="adminLink" href="/admin" style="display:none; color:#c8372e; font-size:13px; text-decoration:none; padding:5px 12px; border:1px solid rgba(200,55,46,0.4); border-radius:8px; align-self:center; margin-right:6px;">管理后台</a>
       <button class="logout-btn" id="logoutBtn" title="退出登录">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
@@ -1927,80 +1854,6 @@
       <!-- 设置页面 -->
       <div class="page" id="page-settings">
         <div class="card">
-          <div class="card-title">分析设置</div>
-
-          <!-- 日线分析模式（已固定，） -->
-          <div class="setting-item" style="display:none">
-            <div>
-              <div class="setting-label">多周期分析</div>
-              <div class="setting-desc">已移除</div>
-            </div>
-            <div class="setting-control">
-              <label class="toggle-switch">
-                <input type="checkbox" id="multiPeriod" disabled>
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-
-          <div class="setting-item">
-            <div>
-              <div class="setting-label">自动保存结果</div>
-              <div class="setting-desc">自动保存扫描结果到本地</div>
-            </div>
-            <div class="setting-control">
-              <label class="toggle-switch">
-                <input type="checkbox" id="autoSave" checked>
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-
-          <div class="setting-item">
-            <div>
-              <div class="setting-label">实时更新</div>
-              <div class="setting-desc">扫描过程中实时显示结果</div>
-            </div>
-            <div class="setting-control">
-              <label class="toggle-switch">
-                <input type="checkbox" id="realtimeUpdate" checked>
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">显示设置</div>
-
-          <div class="setting-item">
-            <div>
-              <div class="setting-label">深色模式</div>
-              <div class="setting-desc">使用深色主题（当前固定）</div>
-            </div>
-            <div class="setting-control">
-              <label class="toggle-switch">
-                <input type="checkbox" id="darkMode" checked disabled>
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-
-          <div class="setting-item">
-            <div>
-              <div class="setting-label">动画效果</div>
-              <div class="setting-desc">启用界面过渡动画</div>
-            </div>
-            <div class="setting-control">
-              <label class="toggle-switch">
-                <input type="checkbox" id="animations" checked>
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
           <div class="card-title">关于</div>
           <div class="theory-content">
             <p><strong>ChanAnalyzer</strong> - 缠论技术分析工具</p>
@@ -2115,20 +1968,97 @@
         return token ? { 'Authorization': `Bearer ${token}` } : {};
       },
 
-      // 封装fetch请求，自动添加认证头
+      // 封装fetch请求，自动添加认证头，统一处理 401（登录失效跳登录页）
       async fetch(url, options = {}) {
         const headers = {
           ...options.headers,
           ...this.getAuthHeaders()
         };
-        return fetch(url, { ...options, headers });
+        const response = await fetch(url, { ...options, headers });
+        if (response.status === 401) {
+          this.clear();
+          window.location.href = '/?expired=1';
+          throw new Error('登录已失效，请重新登录');
+        }
+        if (response.status === 403) {
+          // 主站 403 = 待审核 / 今日 AI 次数用完（后端 detail 已说明原因）
+          let msg = '无权使用该功能';
+          try { const d = await response.clone().json(); if (d && d.detail) msg = d.detail; } catch (e) {}
+          alert(msg);
+          throw new Error(msg);
+        }
+        return response;
       }
     };
+
+    // 加载并显示当前用户名（顶部导航）
+    // 当前用户信息（审核状态 / AI 剩余次数），loadUserInfo 后可用
+    window.currentUser = null;
+
+    // 待审核用户可浏览但不可用 AI/扫描的功能按钮（热门扫描不锁）
+    const APPROVAL_GATED_BUTTONS = ['analyzeBtn', 'buyScanBtn', 'sellScanBtn', 'filterScanBtn'];
+
+    function updateFeatureAccess(u) {
+      const locked = u.role !== 'admin' && u.status === 'pending';
+      APPROVAL_GATED_BUTTONS.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+          btn.disabled = locked;
+          btn.title = locked ? '账号待管理员审核，审核通过后可使用' : '';
+        }
+      });
+      // 待审核横幅（sidebar 用户信息区）
+      let banner = document.getElementById('pendingBanner');
+      if (locked && !banner) {
+        banner = document.createElement('div');
+        banner.id = 'pendingBanner';
+        banner.style.cssText = 'margin:8px 0;padding:8px 10px;border:1px solid #f59e0b;border-radius:6px;color:#f59e0b;font-size:12px;line-height:1.5';
+        banner.textContent = '⏳ 账号待管理员审核：可浏览K线与热门数据，AI 分析和买卖点扫描将在审核通过后开放';
+        const infoEl = document.getElementById('userInfo');
+        if (infoEl && infoEl.parentElement) infoEl.parentElement.appendChild(banner);
+      } else if (!locked && banner) {
+        banner.remove();
+      }
+    }
+
+    async function loadUserInfo() {
+      try {
+        const resp = await AuthManager.fetch(`${API_BASE}/auth/me`);
+        if (resp.ok) {
+          const u = await resp.json();
+          window.currentUser = u;
+          const nameEl = document.getElementById('userName');
+          const infoEl = document.getElementById('userInfo');
+          if (nameEl) nameEl.textContent = u.username;
+          if (infoEl) infoEl.style.display = '';
+          const badgeEl = document.getElementById('memberBadge');
+          if (badgeEl) {
+            if (u.role === 'admin') {
+              badgeEl.innerHTML = '👑 管理员 · AI不限';
+              badgeEl.style.color = '#c8372e';
+            } else if (u.status === 'pending') {
+              badgeEl.innerHTML = '⏳ 待审核';
+              badgeEl.style.color = '#f59e0b';
+            } else {
+              badgeEl.innerHTML = `⚡ 今日AI剩 ${u.ai_remaining ?? '-'} 次`;
+              badgeEl.style.color = u.ai_remaining > 0 ? '#22c55e' : '#f59e0b';
+            }
+          }
+          if (u.role === 'admin') {
+            const adminLink = document.getElementById('adminLink');
+            if (adminLink) adminLink.style.display = 'inline-block';
+          }
+          updateFeatureAccess(u);
+        }
+      } catch (e) { /* 忽略 */ }
+    }
 
     // 页面加载时初始化用户
     document.addEventListener('DOMContentLoaded', async () => {
       // 检查认证状态
       await AuthManager.init();
+      // init 成功才会到这里，加载当前用户名
+      if (AuthManager.initialized) loadUserInfo();
 
       // 登出按钮事件
       const logoutBtn = document.getElementById('logoutBtn');
@@ -2323,6 +2253,16 @@
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            AuthManager.clear();
+            window.location.href = '/?expired=1';
+            return;
+          }
+          if (response.status === 403) {
+            const d = await response.json().catch(() => ({}));
+            alert((d && d.detail) || '无权使用 AI 分析（待审核或今日次数已用完）');
+            return;
+          }
           throw new Error('分析请求失败');
         }
 
@@ -2370,6 +2310,8 @@
         btn.textContent = '🤖 AI分析';
         document.getElementById('analystAStatus').textContent = '';
         document.getElementById('analystBStatus').textContent = '';
+        // 刷新"今日AI剩余"徽章（分析消耗了次数）
+        loadUserInfo();
         // 隐藏分析提示
         document.getElementById('analyzeTip').style.display = 'none';
         // 清除 received 标记
