@@ -69,3 +69,8 @@ AGENTS.md
 前端web页面风格
 改进意见
 登录页面代码
+
+# tdx 重播种运行时产物
+scripts/_reseed_progress.json
+scripts/_reseed_failed.json
+_reseed_full*.log
