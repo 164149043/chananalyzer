@@ -303,7 +303,7 @@ async def get_session(authorization: str = Header(None)):
 
 @app.post("/api/auth/refresh")
 async def refresh_session(authorization: str = Header(None)):
-    """刷新 token（重新签发）"""
+    """刷新 token（重新签发,同步续期 TV cookie）"""
     token = _extract_token(authorization)
     with get_db() as db:
         user_id = verify_token(token, db)
@@ -311,11 +311,17 @@ async def refresh_session(authorization: str = Header(None)):
         if not user:
             raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
         new_token = create_token(user)
-    return {
+    response = JSONResponse({
         "token": new_token,
         "user_id": user_id,
         "expire_hours": TOKEN_EXPIRE_HOURS,
-    }
+    })
+    response.set_cookie(
+        "tv_token", new_token,
+        max_age=TOKEN_EXPIRE_HOURS * 3600,
+        httponly=True, samesite="lax", path="/tv",
+    )
+    return response
 
 
 @app.post("/api/auth/login")
@@ -1585,6 +1591,15 @@ async def get_stock_signals(code: str, user_id: int = Depends(get_current_user))
             "latest_sell": None,
             "error": str(e)
         }
+
+
+@app.get("/api/stock/resolve")
+async def resolve_stock(q: str = "", user_id: int = Depends(get_current_user)):
+    """代码/名称 -> 标准代码+名称(轻量,供 TV 图表入口等前端使用)"""
+    resolved_code, resolved_name, success = resolve_stock_code(q)
+    if not success:
+        return {"error": f"未找到股票: {q}"}
+    return {"code": resolved_code, "name": resolved_name}
 
 
 @app.get("/api/stock/{code}/kline")
