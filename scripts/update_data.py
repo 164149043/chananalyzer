@@ -5,6 +5,8 @@ K线数据日更脚本(tdx版) — 每日收盘后更新本地 K 线缓存
     python -m scripts.update_data --codes 000001 000002   # 更新指定股票
     python -m scripts.update_data --all                    # 更新库内全部股票(约40分钟)
     python -m scripts.update_data --all --skip-week        # 只更日线
+    python -m scripts.update_data --intraday-only          # 只刷新已缓存分钟周期
+    python -m scripts.update_data --all --skip-intraday    # 跳过分钟线刷新
 
 行为(2026-11 从 Tushare 增量模式切换为 tdx 全量重算式):
 - DAY : tdx 拉前复权日线(含自愈复权) → 删旧插新(全量重算)。
@@ -12,6 +14,8 @@ K线数据日更脚本(tdx版) — 每日收盘后更新本地 K 线缓存
         拼接断裂(Tushare 时代 44/50 抽样股假跳空的根因),故每日全量重算,永不拼接。
 - WEEK: 从复权后的 DAY 按周聚合合成(首开/末收/最高/最低/量额求和),
         复权一致性由 DAY 保证,不独立拉取(tdx 周线的除权事件对齐有坑)。
+- 分钟(5M/15M/30M/60M): 按需缓存策略——只刷新库内已有的组合
+        (用户在 TV 图表看过该周期才会入缓存),不主动新增。见 ChanAnalyzer/intraday_cache.py。
 - 新股票(库内无 DAY 数据)全量插入,不做深度对齐截断。
 - 断点续跑: 进度存 scripts/_update_progress.json。
 - 运行时机: 交易日 15:10 之后(tdx 收盘后日线完整);盘中运行会拿到当日实时未收盘K线。
@@ -33,6 +37,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from ChanAnalyzer.database import get_db, KLineData
 from ChanAnalyzer.tdx_source import TdxSource
+from ChanAnalyzer.intraday_cache import cached_intraday_combos, upsert_intraday
 
 PROGRESS_FILE = Path(__file__).parent / "_update_progress.json"
 
@@ -151,16 +156,41 @@ def pd_ts(dt):
     return pd.Timestamp(dt)
 
 
+def refresh_intraday(src: TdxSource):
+    """刷新已缓存的分钟周期组合(按需缓存策略:只更库内已有的,不新增)"""
+    combos = cached_intraday_combos()
+    if not combos:
+        return
+    print(f"\n分钟线刷新: 库内已缓存 {len(combos)} 个 (code, 周期) 组合")
+    ok = fail = 0
+    for code, kl_type in combos:
+        try:
+            n = upsert_intraday(src, code, kl_type)
+        except Exception as e:
+            n = 0
+            print(f"[FAIL] {code} {kl_type}: {type(e).__name__}: {str(e)[:60]}")
+        if n > 0:
+            ok += 1
+        else:
+            fail += 1
+        time.sleep(0.15)
+    print(f"分钟线完成 {ok},失败 {fail}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="K线日更(tdx全量重算式)")
     parser.add_argument("--all", action="store_true", help="更新库内全部股票")
     parser.add_argument("--codes", nargs="*", help="指定股票代码(可新增股票)")
     parser.add_argument("--limit", type=int, help="限制数量(试跑)")
     parser.add_argument("--skip-week", action="store_true", help="跳过周线合成")
+    parser.add_argument("--skip-intraday", action="store_true", help="跳过分钟线刷新")
+    parser.add_argument("--intraday-only", action="store_true", help="只刷新已缓存分钟周期(不更日线)")
     args = parser.parse_args()
 
     if args.codes:
         codes = [c.zfill(6) for c in args.codes]
+    elif args.intraday_only:
+        codes = []
     else:
         with get_db() as db:
             codes = [
@@ -179,7 +209,7 @@ def main():
     src = TdxSource()
     failed, t0 = [], time.time()
     try:
-        for code in codes:
+        for code in codes if not args.intraday_only else []:
             if code in done:
                 continue
             try:
@@ -196,6 +226,8 @@ def main():
                 failed.append((code, msg))
                 print(f"[FAIL] {code}: {msg}")
             time.sleep(0.15)  # 温和限速
+        if not args.skip_intraday:
+            refresh_intraday(src)
     except KeyboardInterrupt:
         print("\n中断,进度已保存")
     finally:
