@@ -46,6 +46,11 @@ TDX_SERVERS = [
 
 CATEGORY_DAY = 9  # pytdx 日线 category
 
+# 分钟线 category(kl_type 字符串 -> pytdx category)与周期分钟数
+# tdx 服务器分钟线保留深度有限:5分/15分/30分/60分 单只均可拉 ~5600 根(2026-11 探针实测)
+INTRADAY_CATEGORY = {"5M": 0, "15M": 1, "30M": 2, "60M": 3}
+INTRADAY_PERIOD_MIN = {"5M": 5, "15M": 15, "30M": 30, "60M": 60}
+
 
 def _to_market_code(code: str):
     """'000001' -> (0=SZ, '000001'); '600519' -> (1=SH, '600519')"""
@@ -147,6 +152,49 @@ class TdxSource:
         ks["date"] = pd.to_datetime(ks["datetime"])
         return ks[["date", "open", "close", "high", "low", "volume", "amount"]].reset_index(drop=True)
 
+    def get_intraday_raw(self, code: str, kl_type: str, pages: int = 8) -> Optional[pd.DataFrame]:
+        """
+        拉原始(不复权)分钟线,分页 700 根/页,默认 8 页 ≈ 5600 根
+
+        tdx 返回的 datetime 为 bar 结束时刻(如 14:15 = 14:10~14:15 那根),
+        TV UDF 规范要求 bar 开始时刻,这里统一减去周期分钟数
+        (5分: 15:00->14:55; 60分: 10:30->09:30,均落在交易时段内)。
+
+        Args:
+            kl_type: "5M" / "15M" / "30M" / "60M"
+
+        Returns: DataFrame[date(bar开始时刻),open,high,low,close,volume,amount] 升序;失败 None
+        """
+        market, tcode = _to_market_code(code)
+        cat = INTRADAY_CATEGORY.get(kl_type)
+        if cat is None:
+            raise ValueError(f"不支持的分钟周期: {kl_type}")
+        frames: List[pd.DataFrame] = []
+        for i in range(pages):
+            df = self._bars_with_retry(cat, market, tcode, i * 700, 700)
+            if df is None or len(df) == 0:
+                break
+            frames.append(df)
+            if len(df) < 700:
+                break
+        if not frames:
+            return None
+        ks = pd.concat(frames, axis=0, sort=False)
+        ks = ks.drop_duplicates(["datetime"], keep="last").sort_values("datetime")
+        ks = ks.rename(columns={"vol": "volume"})
+        ks["date"] = pd.to_datetime(ks["datetime"]) - pd.Timedelta(
+            minutes=INTRADAY_PERIOD_MIN[kl_type]
+        )
+        return ks[["date", "open", "close", "high", "low", "volume", "amount"]].reset_index(drop=True)
+
+    def get_intraday_qfq(self, code: str, kl_type: str, pages: int = 8) -> Optional[pd.DataFrame]:
+        """拉前复权分钟线(qfq_adjust 内部将分钟时间归一化到日粒度,事件对齐天然覆盖)"""
+        raw = self.get_intraday_raw(code, kl_type, pages)
+        if raw is None:
+            return None
+        raw.attrs["code"] = code
+        return self.qfq_adjust(raw, self.get_xdxr(code))
+
     def get_xdxr(self, code: str) -> pd.DataFrame:
         """拉除权除息事件表(原始全部事件)"""
         market, tcode = _to_market_code(code)
@@ -184,6 +232,10 @@ class TdxSource:
         df = df.copy()
         if xdxr is None or len(xdxr) == 0:
             return df
+
+        # 保存原始时间(分钟线带时分):下方第2步的归一化仅用于事件对齐,
+        # 返回前必须恢复,否则同一交易日内全部分钟bar时间戳塌缩到 00:00
+        orig_date = pd.to_datetime(df["date"])
 
         # 1) 扩缩股
         for _, row in xdxr[xdxr["category"] == 11].iterrows():
@@ -242,6 +294,8 @@ class TdxSource:
                 ev.loc[mask, col] = 0.0
             m = _apply(ev)
 
+        # 恢复原始 bar 时间(left merge 保持行序,长度一致)
+        m["date"] = orig_date.to_numpy()
         return m[["date", "open", "high", "low", "close", "volume", "amount"]]
 
     def get_daily_qfq(self, code: str, pages: int = 8) -> Optional[pd.DataFrame]:
