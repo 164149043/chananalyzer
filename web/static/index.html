@@ -1232,6 +1232,7 @@
           </div>
           <div class="btn-group">
             <button class="btn btn-primary" id="klineBtn">📈 K线图表</button>
+            <button class="btn btn-primary" id="tvChartBtn">📊 TV图表</button>
             <button class="btn btn-primary" id="analyzeBtn">🤖 AI分析</button>
           </div>
         </div>
@@ -1252,6 +1253,15 @@
             <button class="kline-toggle active" data-toggle="divergence" style="--c:#e74c3c;">背离</button>
             <button class="kline-toggle active" data-toggle="macd" style="--c:#7f8c8d;">MACD</button>
           </div>
+        </div>
+
+        <!-- TradingView 图表区域(缠论绘制,支持 1D/1W) -->
+        <div class="card" id="tvChartCard" style="display: none;">
+          <div class="card-title" style="display:flex;align-items:center;">
+            <span>TradingView 图表 - 缠论</span>
+            <span id="tvChartHint" style="font-size:0.8em;color:var(--text-tertiary);margin-left:12px;"></span>
+          </div>
+          <div id="tv_chart_container" style="width:100%;height:640px;"></div>
         </div>
 
         <!-- 分析师区域 -->
@@ -2194,6 +2204,46 @@
       } finally {
         btn.disabled = false;
         btn.textContent = '📈 K线图表';
+      }
+    });
+
+    // TradingView 图表按钮(懒加载资源,首次点击才拉取 ~30MB 图表库)
+    document.getElementById('tvChartBtn')?.addEventListener('click', async () => {
+      const q = document.getElementById('stockCode').value.trim();
+      if (!q) {
+        alert('请输入股票代码或名称');
+        return;
+      }
+      await AuthManager.ensureUser();
+      const btn = document.getElementById('tvChartBtn');
+      btn.disabled = true;
+      btn.textContent = '加载中...';
+      try {
+        // 名称输入先解析为标准代码
+        const res = await AuthManager.fetch(`/api/stock/resolve?q=${encodeURIComponent(q)}`);
+        const info = await res.json();
+        if (info.error) {
+          alert(info.error);
+          return;
+        }
+        const card = document.getElementById('tvChartCard');
+        card.style.display = 'block';
+        document.getElementById('tvChartHint').textContent = `${info.name} · 日线/周线 · 图上可搜索换股`;
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // tv-chart.js 本体很小,直接加载;内部再懒加载 datafeed+charting_library
+        if (!window.TVChart) {
+          await new Promise((ok, err) => {
+            const s = document.createElement('script');
+            s.src = '/static/tv-chart.js?v=1';
+            s.onload = ok;
+            s.onerror = () => err(new Error('tv-chart.js 加载失败'));
+            document.head.appendChild(s);
+          }).catch(e => { alert(e.message); });
+        }
+        if (window.TVChart) window.TVChart.open(info.code);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📊 TV图表';
       }
     });
 
