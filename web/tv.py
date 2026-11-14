@@ -248,7 +248,7 @@ async def tv_symbols(request: Request, symbol: str = ""):
         "pricescale": 100,
         "minmov": 1,
         "has_intraday": True,
-        "intraday_multipliers": [5, 15, 30, 60],  # 分钟线按需缓存,首次拉取需数秒
+        "intraday_multipliers": ["5", "15", "30", "60"],  # 分钟线按需缓存,首次拉取需数秒
         "has_daily": True,
         "has_weekly_and_monthly": True,
         "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
@@ -411,3 +411,100 @@ async def tv_time(request: Request):
     if await _tv_user(request) is None:
         return _unauthorized()
     return int(time_mod.time())
+
+
+# ==================== 图表布局云同步(TV save_load,按登录用户隔离) ====================
+
+_Kind = str  # 'chart' | 'template'
+
+
+def _chart_not_found():
+    return JSONResponse({"status": "error", "message": "chart not found"}, status_code=404)
+
+
+async def _charts_storage(
+    request: Request,
+    version: str,
+    kind: _Kind,
+):
+    """
+    TV charting_library save_load 存储协议(与 chanlun-pro 同形状):
+        GET    /tv/{version}/charts?client&user[&chart]      列表 / 单取
+        POST   /tv/{version}/charts?client&user[&chart]      新建 / 更新(form: name,content,symbol,resolution)
+        DELETE /tv/{version}/charts?client&user&chart        删除
+    user 归属以 tv_token 认证为准(不信任 query 的 user 参数,多用户隔离)。
+    """
+    user_id = await _tv_user(request)
+    if user_id is None:
+        return _unauthorized()
+    client = request.query_params.get("client", "")
+    chart_param = request.query_params.get("chart") or request.query_params.get("template")
+
+    from ChanAnalyzer.database import TvChart
+    with get_db() as db:
+        if request.method == "GET":
+            if chart_param is None:
+                items = (
+                    db.query(TvChart)
+                    .filter(TvChart.user_id == user_id, TvChart.kind == kind, TvChart.client == client)
+                    .order_by(TvChart.ts.desc())
+                    .all()
+                )
+                return {"status": "ok", "data": [
+                    {"id": c.id, "name": c.name, "symbol": c.symbol,
+                     "resolution": c.resolution, "timestamp": c.ts}
+                    for c in items
+                ]}
+            c = db.query(TvChart).filter(
+                TvChart.id == int(chart_param), TvChart.user_id == user_id, TvChart.kind == kind
+            ).first()
+            if not c:
+                return _chart_not_found()
+            return {"status": "ok", "data": {
+                "id": c.id, "name": c.name, "content": c.content, "timestamp": c.ts,
+            }}
+
+        if request.method == "DELETE":
+            if chart_param is None:
+                return _chart_not_found()
+            db.query(TvChart).filter(
+                TvChart.id == int(chart_param), TvChart.user_id == user_id, TvChart.kind == kind
+            ).delete(synchronize_session=False)
+            db.commit()
+            return {"status": "ok"}
+
+        # POST: 新建或更新
+        form = await request.form()
+        name = str(form.get("name") or "").strip() or "未命名"
+        content = str(form.get("content") or "")
+        symbol = str(form.get("symbol") or "")
+        resolution = str(form.get("resolution") or "")
+        now = int(time_mod.time())
+        if chart_param is None:
+            c = TvChart(user_id=user_id, kind=kind, client=client, name=name,
+                        content=content, symbol=symbol, resolution=resolution, ts=now)
+            db.add(c)
+            db.commit()
+            return {"status": "ok", "id": c.id}
+        c = db.query(TvChart).filter(
+            TvChart.id == int(chart_param), TvChart.user_id == user_id, TvChart.kind == kind
+        ).first()
+        if not c:
+            return _chart_not_found()
+        c.name, c.content, c.symbol, c.resolution, c.ts = name, content, symbol, resolution, now
+        db.commit()
+        return {"status": "ok"}
+
+
+@router.get("/{version}/charts")
+@router.post("/{version}/charts")
+@router.delete("/{version}/charts")
+async def tv_charts(request: Request, version: str):
+    return await _charts_storage(request, version, kind="chart")
+
+
+@router.get("/{version}/study_templates")
+@router.post("/{version}/study_templates")
+@router.delete("/{version}/study_templates")
+async def tv_study_templates(request: Request, version: str):
+    return await _charts_storage(request, version, kind="template")

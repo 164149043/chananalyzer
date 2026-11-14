@@ -164,6 +164,31 @@
     },
   };
 
+  // ==================== 图表布局云同步(后端 /tv/1.1/charts,按登录用户隔离) ====================
+
+  var CloudSync = {
+    api: function (path, opts) {
+      return fetch("/tv/1.1/" + path, Object.assign({ credentials: "same-origin" }, opts))
+        .then(function (r) { return r.json(); });
+    },
+    save: function (name, content, symbol, resolution, id) {
+      var body = new URLSearchParams({
+        name: name, content: content, symbol: symbol || "", resolution: resolution || "",
+      });
+      var q = "client=chananalyzer" + (id ? "&chart=" + id : "");
+      return CloudSync.api("charts?" + q, { method: "POST", body: body });
+    },
+    list: function () {
+      return CloudSync.api("charts?client=chananalyzer").then(function (d) { return d.data || []; });
+    },
+    get: function (id) {
+      return CloudSync.api("charts?client=chananalyzer&chart=" + id);
+    },
+    remove: function (id) {
+      return CloudSync.api("charts?client=chananalyzer&chart=" + id, { method: "DELETE" });
+    },
+  };
+
   function ChartManager(containerId) {
     this.id = containerId;
     this.obj_charts = {};
@@ -200,8 +225,10 @@
       symbol_search_request_delay: 100,
       auto_save_delay: 5,
       study_count_limit: 100,
-      disabled_features: ["go_to_date"],
+      disabled_features: ["go_to_date", "header_saveload"],
       enabled_features: ["seconds_resolution"],
+      // 图表布局云同步: 此库版本的内置 save_load 走 TV 账号体系且自定义 storage 协议
+      // 已不生效,故隐藏 TV 原生按钮,由工具栏"保存/加载布局"按钮直连后端 REST
     });
 
     this.setupEventListeners();
@@ -228,15 +255,9 @@
         manager.handleVisibleRangeChange();
       });
 
-      // 工具栏按钮: 重新加载数据
-      widget.headerReady().then(function () {
-        var btnReload = widget.createButton();
-        btnReload.textContent = "刷新数据";
-        btnReload.addEventListener("click", function () {
-          widget.resetCache();
-          widget.activeChart().resetData();
-        });
-      });
+      // 注: 不用 widget.headerReady()/createButton 加工具栏按钮——
+      // 该路径在此库版本+当前 feature 配置下不再 resolve(headerReady 挂起,按钮静默不出现)。
+      // 自定义按钮由页面卡片头部提供(见 index.html 的 tvLayoutBtn)。
     });
   };
 
@@ -395,6 +416,65 @@
     drawList("mmds", function (c, it) { return ChartUtils.createMmdShape(c, it); });
   };
 
+  // ==================== 云端布局对话框(保存/加载/删除) ====================
+
+  ChartManager.prototype.showLayoutDialog = function () {
+    var manager = this;
+    CloudSync.list().then(function (items) {
+      var lines = items.map(function (it, i) {
+        var d = new Date((it.timestamp || 0) * 1000);
+        var ds = d.toLocaleDateString() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+        return (i + 1) + ". " + it.name + "  [" + (it.symbol || "") + " " + (it.resolution || "") + " " + ds + "]";
+      });
+      var msg = lines.length
+        ? "云端布局列表:\n" + lines.join("\n") +
+          "\n\n输入编号加载(加 d 前缀删除,如 d1);直接输入文字=保存为新布局"
+        : "暂无云端布局。\n输入名称保存当前布局";
+      var input = window.prompt(msg, "");
+      if (input === null) return;
+      input = String(input).trim();
+      if (!input) return;
+
+      // d+编号 = 删除
+      var mDel = /^d(\d+)$/i.exec(input);
+      if (mDel) {
+        var idxD = parseInt(mDel[1], 10) - 1;
+        if (items[idxD]) {
+          if (window.confirm("删除布局「" + items[idxD].name + "」?")) {
+            CloudSync.remove(items[idxD].id).then(function () { manager.showLayoutDialog(); });
+          }
+        }
+        return;
+      }
+      // 纯编号 = 加载
+      var mLoad = /^(\d+)$/.exec(input);
+      if (mLoad) {
+        var idx = parseInt(mLoad[1], 10) - 1;
+        if (!items[idx]) { window.alert("编号不存在"); return; }
+        CloudSync.get(items[idx].id).then(function (d) {
+          if (!d || !d.data || !d.data.content) { window.alert("布局内容为空"); return; }
+          manager.widget.load(JSON.parse(d.data.content)).catch(function (e) {
+            window.alert("加载失败: " + e);
+          });
+        });
+        return;
+      }
+      // 其他文字 = 保存新布局
+      var si = manager.widget.symbolInterval ? manager.widget.symbolInterval() : {};
+      manager.widget.save().then(function (json) {
+        CloudSync.save(input, JSON.stringify(json), si.symbol || "", String(si.interval || "")).then(function (d) {
+          if (d && d.status === "ok") {
+            window.alert("已保存: " + input);
+          } else {
+            window.alert("保存失败");
+          }
+        });
+      });
+    }).catch(function () {
+      window.alert("云端布局服务不可用(未登录?)");
+    });
+  };
+
   ChartManager.prototype.setSymbol = function (code) {
     this.currentCode = code;
     this.resetDrawRetry();
@@ -404,7 +484,7 @@
     }
   };
 
-  // ==================== 对外接口 ====================
+  // ==================== 资源懒加载 ====================
 
   var manager = null;
 
@@ -442,5 +522,18 @@
     else manager.setSymbol(code);
   }
 
-  window.TVChart = { open: open };
+  // ==================== 对外接口 ====================
+
+  window.TVChart = { open: open, layouts: layouts, refresh: refresh };
+
+  function layouts() {
+    if (manager) manager.showLayoutDialog();
+  }
+
+  function refresh() {
+    if (manager && manager.widget) {
+      manager.widget.resetCache();
+      manager.widget.activeChart().resetData();
+    }
+  }
 })();

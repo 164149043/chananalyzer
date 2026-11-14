@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Boolean, Index, UniqueConstraint, inspect, text
+from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Boolean, Index, UniqueConstraint, inspect, text, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
@@ -259,4 +259,23 @@ class VerificationCode(Base):
 
     __table_args__ = (
         Index('idx_vc_target_created', 'target', 'created_at'),
+    )
+
+
+class TvChart(Base):
+    """TradingView 图表布局存储（save_load 云同步,按登录用户隔离）"""
+    __tablename__ = "tv_charts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)              # 归属用户
+    kind = Column(String(16), nullable=False, default='chart')         # 'chart'=图表布局 / 'template'=指标模板
+    client = Column(String(64), nullable=False, default='')            # TV client_id
+    name = Column(String(128), nullable=False)                         # 布局名
+    content = Column(Text, nullable=False)                             # TV 布局 JSON
+    symbol = Column(String(16), nullable=True)
+    resolution = Column(String(8), nullable=True)
+    ts = Column(Integer, nullable=False, default=0)                    # 更新时间 unix 秒
+
+    __table_args__ = (
+        Index('idx_tvc_user_kind', 'user_id', 'kind'),
     )
