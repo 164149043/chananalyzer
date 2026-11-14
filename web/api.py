@@ -110,6 +110,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# TV UDF datafeed 路由(/tv/config|symbols|search|history,cookie 认证)
+from web.tv import router as tv_router  # noqa: E402
+app.include_router(tv_router)
+
 # 挂载静态文件目录
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
@@ -332,12 +336,19 @@ async def login(request: Request):
             raise HTTPException(status_code=401, detail="账号或密码错误")
         token = create_token(user)
         user_data = user.to_dict()
-    return {
+    response = JSONResponse({
         "token": token,
         "user_id": user_data["id"],
         "user": user_data,
         "expire_hours": TOKEN_EXPIRE_HOURS,
-    }
+    })
+    # TV datafeed 专用 cookie: charting_library 的 UDF 请求不带 Authorization 头
+    response.set_cookie(
+        "tv_token", token,
+        max_age=TOKEN_EXPIRE_HOURS * 3600,
+        httponly=True, samesite="lax", path="/tv",
+    )
+    return response
 
 
 class RegisterRequest(BaseModel):

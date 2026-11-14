@@ -62,6 +62,7 @@ class ChanAnalyzer:
         end_date: Optional[str] = None,
         token: Optional[str] = None,
         config: Optional[dict[str, Any]] = None,
+        levels: Optional[list] = None,
     ):
         """
         初始化分析器
@@ -72,10 +73,12 @@ class ChanAnalyzer:
             end_date: 结束日期 (默认当前)
             token: Tushare Token (默认从环境变量 TUSHARE_TOKEN 读取)
             config: 缠论配置参数
+            levels: 级联级别列表 (默认 [KL_TYPE.K_DAY] 仅日线; 传 [K_DAY, K_WEEK] 可取周线级别)
         """
         self.code = code
         self.begin_date = begin_date
         self.end_date = end_date
+        self.levels = levels
 
         # 设置 Token
         if token:
@@ -121,7 +124,7 @@ class ChanAnalyzer:
                 begin_time=self.begin_date,
                 end_time=self.end_date,
                 data_src=DATA_SRC.CACHE_DB,
-                lv_list=[KL_TYPE.K_DAY],
+                lv_list=self.levels if self.levels else [KL_TYPE.K_DAY],
                 config=self.config,
                 autype=AUTYPE.QFQ,
             )
@@ -407,19 +410,22 @@ class ChanAnalyzer:
         else:
             return "中枢内部"
 
-    def get_analysis(self) -> dict[str, Any]:
+    def get_analysis(self, level_idx: int = 0) -> dict[str, Any]:
         """
         获取结构化分析结果
 
+        Args:
+            level_idx: 级联级别下标 (0=最低级别,默认日线; 1=上一级别,需 levels 传入多级别)
+
         Returns:
-            日线分析结果字典
+            对应级别的分析结果字典
         """
         if self._analysis is not None:
             return self._analysis
 
         chan = self._load_chan()
 
-        self._analysis = self._analyze_single_level(chan, 0)
+        self._analysis = self._analyze_single_level(chan, level_idx)
         self._analysis["code"] = self.code
         self._analysis["name"] = self.code
 
