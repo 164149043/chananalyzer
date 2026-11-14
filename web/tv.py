@@ -26,7 +26,9 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from ChanAnalyzer.database import get_db, KLineData
-from ChanAnalyzer.intraday_cache import INTRADAY_KL_TYPES, ensure_intraday, ensure_intraday_fresh
+from ChanAnalyzer.intraday_cache import (
+    INTRADAY_KL_TYPES, ensure_intraday, ensure_intraday_fresh, ensure_day_fresh,
+)
 
 router = APIRouter(prefix="/tv", tags=["tv"])
 
@@ -348,6 +350,18 @@ async def tv_history(
         # 盘中/日更前兜底刷新: 内部轻量判断,数据过期才真正增量拉取(冷却=周期与10分钟较大值)
         from starlette.concurrency import run_in_threadpool
         refreshed = await run_in_threadpool(ensure_intraday_fresh, code, kl_type, rows[-1].timestamp)
+        if refreshed:
+            with get_db() as db:
+                rows = (
+                    db.query(KLineData)
+                    .filter(KLineData.code == code, KLineData.kl_type == kl_type)
+                    .order_by(KLineData.timestamp.asc())
+                    .all()
+                )
+    elif rows and kl_type == "DAY":
+        # 日线兜底刷新: 盘中追当日实时bar(未收盘,缠论现虚线笔),收盘后30分钟补最终收盘价
+        from starlette.concurrency import run_in_threadpool
+        refreshed = await run_in_threadpool(ensure_day_fresh, code, rows[-1].timestamp)
         if refreshed:
             with get_db() as db:
                 rows = (

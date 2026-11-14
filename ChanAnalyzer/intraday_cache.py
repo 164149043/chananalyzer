@@ -226,3 +226,137 @@ def _refresh_tail(src: TdxSource, code: str, kl_type: str) -> int:
         db.add_all(rows)
         db.commit()
     return len(rows)
+
+
+# ==================== 日线/周线盘中兜底刷新 ====================
+
+DAY_COOLDOWN = timedelta(minutes=30)
+
+
+def ensure_day_fresh(code: str, last_ts: datetime) -> bool:
+    """
+    日线兜底刷新(tv_history 请求触发,机制同分钟版):
+    - 盘中: 库内停在昨日 → 拉含当日实时未收盘K线(缠论会出现虚线笔,实时行情正常表现)
+    - 收盘后~日更前: 收盘后30分钟冷却期过会再拉一次,补到最终收盘价
+    刷新成功后顺带重合成尾部周线。
+    """
+    now = datetime.now()
+    key = (code, "DAY")
+    if now - _refresh_at.get(key, datetime.min) < DAY_COOLDOWN:
+        return False
+    if last_ts + DAY_COOLDOWN >= _expected_last_bar_dt():
+        return False
+
+    with _ensure_lock:
+        if key in _inflight:
+            return False
+        _inflight.add(key)
+        _refresh_at[key] = now
+    try:
+        src = TdxSource()
+        try:
+            return _refresh_day_tail(src, code) > 0
+        finally:
+            src.close()
+    except Exception:
+        return False
+    finally:
+        with _ensure_lock:
+            _inflight.discard(key)
+
+
+def _refresh_day_tail(src: TdxSource, code: str) -> int:
+    """日线尾部增量: 拉前2页(≈1400根,覆盖库内深度),口径校验后尾部替换。
+    日线行时间口径统一 15:00(与 update_data 日更一致,避免同日双行)。"""
+    df = src.get_daily_qfq(code, pages=2)
+    if df is None or len(df) == 0:
+        return 0
+
+    def _day_ts(dt_like) -> datetime:
+        return dt_like.to_pydatetime().replace(hour=15, minute=0, second=0, microsecond=0)
+
+    win_start = _day_ts(df["date"].iloc[0])
+
+    with get_db() as db:
+        ok = True
+        for i in range(min(3, len(df))):
+            old = (
+                db.query(KLineData.close)
+                .filter(KLineData.code == code, KLineData.kl_type == "DAY",
+                        KLineData.timestamp == _day_ts(df["date"].iloc[i]))
+                .first()
+            )
+            if old and abs(old[0] - float(df["close"].iloc[i])) / max(abs(old[0]), 1e-9) > 0.001:
+                ok = False
+                break
+
+    rows = []
+    for _, r in df.iterrows():
+        dt = _day_ts(r["date"])
+        rows.append(KLineData(
+            code=code, kl_type="DAY",
+            date=dt.strftime("%Y/%m/%d 15:00:00"),
+            timestamp=dt,
+            open=float(r["open"]), high=float(r["high"]),
+            low=float(r["low"]), close=float(r["close"]),
+            volume=float(r["volume"]) if r["volume"] else 0,
+            amount=round(float(r["amount"]), 2) if r.get("amount") else None,
+            turnover_rate=None,
+        ))
+
+    with get_db() as db:
+        if not ok:
+            # 除权 → 全历史因子已变,尾部替换会断裂;保守起见只保留已有数据,
+            # 交给当晚日更全量重算(日线不像分钟有 upsert_intraday 全量入口)
+            return 0
+        db.query(KLineData).filter(
+            KLineData.code == code, KLineData.kl_type == "DAY",
+            KLineData.timestamp >= win_start,
+        ).delete(synchronize_session=False)
+        db.add_all(rows)
+        db.commit()
+
+    _rebuild_week_tail(code)
+    return len(rows)
+
+
+def _rebuild_week_tail(code: str):
+    """从库内全量 DAY 重合成尾部周线(日线刷新后最后一根周bar随之变化)。
+    周行口径与日更一致: date "YYYY/MM/DD",timestamp 00:00。"""
+    with get_db() as db:
+        days = (
+            db.query(KLineData)
+            .filter(KLineData.code == code, KLineData.kl_type == "DAY")
+            .order_by(KLineData.timestamp.asc())
+            .all()
+        )
+        if not days:
+            return
+        # 只需尾部几周,聚合全部但只写最后2个ISO周
+        groups: list = []  # [(iso_key, [day_rows])]
+        for d in days:
+            iso = d.timestamp.isocalendar()
+            k = (iso[0], iso[1])
+            if not groups or groups[-1][0] != k:
+                groups.append((k, []))
+            groups[-1][1].append(d)
+        tail = groups[-2:] if len(groups) >= 2 else groups[:]
+        week_start_ts = tail[0][1][0].timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        week_rows = []
+        for _k, g in tail:
+            last = g[-1]
+            week_rows.append(KLineData(
+                code=code, kl_type="WEEK",
+                date=last.timestamp.strftime("%Y/%m/%d"),
+                timestamp=last.timestamp.replace(hour=0, minute=0, second=0, microsecond=0),
+                open=g[0].open, high=max(x.high for x in g), low=min(x.low for x in g),
+                close=last.close, volume=sum(x.volume or 0 for x in g),
+                amount=sum(x.amount or 0 for x in g) or None, turnover_rate=None,
+            ))
+        db.query(KLineData).filter(
+            KLineData.code == code, KLineData.kl_type == "WEEK",
+            KLineData.timestamp >= week_start_ts,
+        ).delete(synchronize_session=False)
+        db.add_all(week_rows)
+        db.commit()
