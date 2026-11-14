@@ -12,7 +12,7 @@ from typing import Any, List, Optional, Union
 
 from Chan import CChan
 from ChanConfig import CChanConfig
-from Common.CEnum import AUTYPE, DATA_SRC, KL_TYPE
+from Common.CEnum import AUTYPE, DATA_SRC, FX_TYPE, KL_TYPE
 
 
 def _load_env():
@@ -196,6 +196,24 @@ class ChanAnalyzer:
                 "is_sure": seg.is_sure,
             })
 
+        # 获取分型数据(合并K线上被识别的顶底分型,时间取分型极值K线)
+        fx_list = []
+        for klc in kl_data.lst:
+            if klc.fx == FX_TYPE.TOP:
+                klu = max(klc.lst, key=lambda k: k.high)
+                fx_list.append({
+                    "type": "ding",
+                    "date": klu.time.to_str(),
+                    "price": klc.high,
+                })
+            elif klc.fx == FX_TYPE.BOTTOM:
+                klu = min(klc.lst, key=lambda k: k.low)
+                fx_list.append({
+                    "type": "di",
+                    "date": klu.time.to_str(),
+                    "price": klc.low,
+                })
+
         # 获取中枢数据
         zs_list = []
         for zs in kl_data.zs_list:
@@ -256,6 +274,7 @@ class ChanAnalyzer:
             "bi_list": bi_list,
             "seg_list": seg_list,
             "zs_list": zs_list,
+            "fx_list": fx_list,
             "buy_signals": buy_signals,
             "sell_signals": sell_signals,
             "volume_analysis": volume_analysis,
