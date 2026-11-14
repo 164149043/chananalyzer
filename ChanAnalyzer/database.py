@@ -190,6 +190,7 @@ KL_TYPE_NAME = {
     KL_TYPE.K_5M: "5M",
     KL_TYPE.K_15M: "15M",
     KL_TYPE.K_30M: "30M",
+    KL_TYPE.K_60M: "60M",
     KL_TYPE.K_DAY: "DAY",
     KL_TYPE.K_WEEK: "WEEK",
     KL_TYPE.K_MON: "MON",
