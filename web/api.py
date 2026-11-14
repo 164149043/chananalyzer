@@ -1602,61 +1602,6 @@ async def resolve_stock(q: str = "", user_id: int = Depends(get_current_user)):
     return {"code": resolved_code, "name": resolved_name}
 
 
-@app.get("/api/stock/{code}/kline")
-async def get_stock_kline(code: str, limit: int = 500, user_id: int = Depends(get_current_user)):
-    """获取K线原始数据 + 缠论标记（笔/线段/中枢/买卖点）
-
-    支持股票代码或名称输入（模糊匹配）。登录即可用，无审核/次数限制。
-    """
-    resolved_code, resolved_name, success = resolve_stock_code(code)
-    if not success:
-        return {"error": f"未找到股票: {code}"}
-
-    try:
-        limit = max(50, min(limit, 3000))
-
-        # 从数据库查询原始K线
-        from ChanAnalyzer.database import KLineData
-        with get_db() as db:
-            query = db.query(KLineData).filter(
-                KLineData.code == resolved_code,
-                KLineData.kl_type == "DAY"
-            ).order_by(KLineData.timestamp.desc()).limit(limit)
-            kline_rows = query.all()
-            kline_rows.reverse()
-
-        if not kline_rows:
-            return {"code": resolved_code, "name": resolved_name, "error": "无K线数据"}
-
-        # 获取缠论分析
-        ChanAnalyzer = import_chan_analyzer()
-        analyzer = ChanAnalyzer(code=resolved_code)
-        analysis = analyzer.get_analysis()
-
-        if "error" in analysis:
-            return {"code": resolved_code, "name": resolved_name, "error": analysis["error"]}
-
-        return {
-            "code": resolved_code,
-            "name": resolved_name,
-            "data_date": kline_rows[-1].date,
-            "kline": [
-                {"date": r.date, "open": r.open, "high": r.high,
-                 "low": r.low, "close": r.close, "volume": r.volume}
-                for r in kline_rows
-            ],
-            "bi_list": analysis.get("bi_list", []),
-            "seg_list": analysis.get("seg_list", []),
-            "zs_list": analysis.get("zs_list", []),
-            "buy_signals": analysis.get("buy_signals", []),
-            "sell_signals": analysis.get("sell_signals", []),
-        }
-    except Exception as e:
-        import traceback
-        print(f"[get_stock_kline] {resolved_code} 获取K线失败: {e}\n{traceback.format_exc()}")
-        return {"code": resolved_code, "name": resolved_name, "error": str(e)}
-
-
 def get_stock_name_by_code(code: str) -> str:
     """根据股票代码获取股票名称"""
     try:
