@@ -10,11 +10,13 @@ TradingView UDF datafeed 后端 — 供 charting_library 的 datafeeds/udf 魔�
 认证: UDF 请求由 charting_library 发起,不带 Authorization 头,
      走 httpOnly cookie `tv_token`(登录端点下发,同 JWT)。
 
-数据: K线从 KLineData 表读取(DAY/WEEK);缠论由 CChan 计算(日线直连/周线级联)。
+数据: K线从 KLineData 表读取(DAY/WEEK/分钟);缠论由 CChan 计算(日线直连/周线级联/分钟单级别)。
      缠论结果按 (code, kl_type, 库内最后K线日期) 进程内缓存——库内数据只在日更后变化,
      盘中轮询(firstDataRequest=false)全命中缓存,无重算开销。
 
-周期: 阶段B 仅日线("1D")与周线("1W");分钟线待阶段C后接入。
+周期: 日线("1D")/周线("1W") 全量缓存;分钟(5/15/30/60)按需缓存——
+     首次请求某只股票的分钟周期时从 tdx 拉取入缓存(ChanAnalyzer.intraday_cache,
+     带并发防重,拉取需数秒),之后走库;日更只刷新已缓存组合。
 """
 import time as time_mod
 from datetime import datetime
@@ -24,6 +26,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from ChanAnalyzer.database import get_db, KLineData
+from ChanAnalyzer.intraday_cache import INTRADAY_KL_TYPES, ensure_intraday
 
 router = APIRouter(prefix="/tv", tags=["tv"])
 
@@ -37,14 +40,23 @@ _cl_cache: dict = {}
 # ==================== 工具 ====================
 
 def _to_unix(date_str: str) -> int:
-    """'YYYY/MM/DD[ HH:MM:SS]' -> 本地时区 unix 秒"""
+    """'YYYY/MM/DD[ HH:MM[:SS]]' -> 本地时区 unix 秒"""
     s = str(date_str)[:19]
-    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M", "%Y/%m/%d",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
             return int(datetime.strptime(s, fmt).timestamp())
         except ValueError:
             continue
     return 0
+
+
+# TV resolution -> KLineData.kl_type(分钟周期对应按需缓存)
+_RESOLUTION_KL = {
+    "5": "5M", "15": "15M", "30": "30M", "60": "60M",
+    "1D": "DAY", "D": "DAY", "DAY": "DAY",
+    "1W": "WEEK", "W": "WEEK", "WEEK": "WEEK",
+}
 
 
 def _resolve_symbol(symbol: str):
@@ -105,12 +117,18 @@ def _build_cl_chart_data(code: str, kl_type: str) -> Optional[dict]:
     if cached and cached[0] == last_date:
         return cached[1]
 
-    # 计算: 周线走级联(lv_list 从大到小: [K_WEEK, K_DAY],level 0 即周线),日线走默认
+    # 计算: 周线走级联(lv_list 从大到小: [K_WEEK, K_DAY],level 0 即周线);
+    # 分钟线单级别;日线走默认
     import importlib
     ChanAnalyzer = importlib.import_module("ChanAnalyzer.analyzer").ChanAnalyzer
+    from Common.CEnum import KL_TYPE
+    _KL_TYPE_ENUM = {"5M": KL_TYPE.K_5M, "15M": KL_TYPE.K_15M,
+                     "30M": KL_TYPE.K_30M, "60M": KL_TYPE.K_60M}
     if kl_type == "WEEK":
-        from Common.CEnum import KL_TYPE
         analyzer = ChanAnalyzer(code=code, levels=[KL_TYPE.K_WEEK, KL_TYPE.K_DAY])
+        analysis = analyzer.get_analysis()
+    elif kl_type in _KL_TYPE_ENUM:
+        analyzer = ChanAnalyzer(code=code, levels=[_KL_TYPE_ENUM[kl_type]])
         analysis = analyzer.get_analysis()
     else:
         analyzer = ChanAnalyzer(code=code)
@@ -149,37 +167,36 @@ def _build_cl_chart_data(code: str, kl_type: str) -> Optional[dict]:
             "linestyle": "0",
         })
 
-    # 买卖点: 1buy->1B / 2sell->2S / l3buy->L3B ...
-    _mm_short = {"l2buy": "L2B", "l3buy": "L3B", "l2sell": "L2S", "l3sell": "L3S"}
+    # 分型: text="ding"顶(红)/"di"底(蓝),与 chanlun-pro 前端约定一致
+    fxs = []
+    for fx in analysis.get("fx_list", []):
+        fxs.append({
+            "points": [
+                {"time": _to_unix(fx["date"]), "price": fx["price"]},
+                {"time": _to_unix(fx["date"]), "price": fx["price"]},
+            ],
+            "text": fx["type"],
+        })
 
-    def _mm_label(t_raw, t_str):
-        # t_raw 可能是 list(CChan 一个买卖点可属多个类型)
-        try:
-            if isinstance(t_raw, (list, tuple)):
-                t_raw = t_raw[0] if len(t_raw) == 1 else ",".join(str(x) for x in t_raw)
-            if isinstance(t_raw, (int, str)) and str(t_raw) in _mm_short:
-                return _mm_short[str(t_raw)]
-        except Exception:
-            pass
-        s = str(t_str).replace("买", "B").replace("卖", "S").replace(" ", "")
-        return s if s else str(t_str)
-
+    # 买卖点: CChan 类型值(1/1p/2/2s/3a/3b) + 买B/卖S方向后缀,如 "2B" "2sS"
     mmds = []
     for sig in analysis.get("buy_signals", []) + analysis.get("sell_signals", []):
+        t = str(sig.get("type") or "?").strip().strip(",")
+        text = f"{t}{'B' if sig.get('is_buy', True) else 'S'}"
         mmds.append({
             "points": {"time": _to_unix(sig["date"]), "price": sig["price"]},
-            "text": _mm_label(sig.get("type_raw"), sig.get("type", "")),
+            "text": text,
         })
 
     data = {
-        "fxs": [],        # 分型: 阶段B暂不输出(笔端点已含分型信息)
+        "fxs": fxs,
         "bis": bis,
         "xds": xds,
         "zsds": [],       # 走势段: CChan 引擎无该级别
         "bi_zss": bi_zss,
-        "xd_zss": [],     # 线段中枢: 引擎当前仅输出笔中枢
+        "xd_zss": [],     # 线段中枢: CChan 引擎无线段级中枢(多级别靠周期切换)
         "zsd_zss": [],
-        "bcs": [],        # 背驰标记: 阶段B暂不输出
+        "bcs": [],        # 背驰标记: CChan 不单独输出(买卖点即背驰应用)
         "mmds": mmds,
     }
     _cl_cache[(code, kl_type)] = (last_date, data)
@@ -195,7 +212,7 @@ async def tv_config(request: Request):
     return {
         "supports_search": True,
         "supports_group_request": False,
-        "supported_resolutions": ["1D", "1W"],
+        "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
         "supports_marks": False,
         "supports_timescale_marks": False,
         "supports_time": True,
@@ -221,10 +238,11 @@ async def tv_symbols(request: Request, symbol: str = ""):
         "timezone": "Asia/Shanghai",
         "pricescale": 100,
         "minmov": 1,
-        "has_intraday": False,      # 分钟线阶段C后接入
+        "has_intraday": True,
+        "intraday_multipliers": [5, 15, 30, 60],  # 分钟线按需缓存,首次拉取需数秒
         "has_daily": True,
         "has_weekly_and_monthly": True,
-        "supported_resolutions": ["1D", "1W"],
+        "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
         "visible_plots_set": "ohlcv",
     }
 
@@ -265,7 +283,7 @@ async def tv_search(
                 "type": type or "stock",
                 "session": "0930-1130,1300-1500",
                 "timezone": "Asia/Shanghai",
-                "supported_resolutions": ["1D", "1W"],
+                "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
             })
     return out
 
@@ -283,7 +301,7 @@ async def tv_history(
         return _unauthorized()
 
     code, _market = _resolve_symbol(symbol)
-    kl_type = "WEEK" if resolution in ("1W", "W", "WEEK") else "DAY"
+    kl_type = _RESOLUTION_KL.get(resolution, "DAY")
 
     now = time_mod.time()
     status = "ok"
@@ -307,6 +325,18 @@ async def tv_history(
             .order_by(KLineData.timestamp.asc())
             .all()
         )
+
+    # 分钟周期按需缓存: 库内无数据时首次从 tdx 拉取入缓存(阻塞数秒,丢线程池避免卡事件循环)
+    if not rows and kl_type in INTRADAY_KL_TYPES:
+        from starlette.concurrency import run_in_threadpool
+        await run_in_threadpool(ensure_intraday, code, kl_type)
+        with get_db() as db:
+            rows = (
+                db.query(KLineData)
+                .filter(KLineData.code == code, KLineData.kl_type == kl_type)
+                .order_by(KLineData.timestamp.asc())
+                .all()
+            )
     if not rows:
         return {"s": "no_data"}
 
