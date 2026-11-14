@@ -1879,9 +1879,8 @@
     // ============================================
     // API 配置
     // ============================================
-    const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? `http://${window.location.hostname}:8000/api`
-      : '/api';
+    // 前后端同源部署,统一走相对路径(历史版本曾对 localhost 硬编码 8000 端口,已移除)
+    const API_BASE = '/api';
 
     // ============================================
     // 轮询定时器管理

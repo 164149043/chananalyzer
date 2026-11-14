@@ -53,7 +53,7 @@ def start_server(host=None, port=None, open_browser=True):
     if host is None:
         host = "0.0.0.0" if is_cloud else "127.0.0.1"
     if port is None:
-        port = int(os.environ.get("PORT", "8000"))
+        port = int(os.environ.get("PORT", "8899"))
 
     # 云环境不打开浏览器
     if is_cloud:
@@ -100,7 +100,7 @@ def start_server(host=None, port=None, open_browser=True):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ChanAnalyzer Web 服务")
     parser.add_argument("--host", default=None, help="监听地址（默认云平台0.0.0.0，本地127.0.0.1）")
-    parser.add_argument("--port", type=int, default=None, help="监听端口（默认从环境变量PORT读取或8000）")
+    parser.add_argument("--port", type=int, default=None, help="监听端口（默认从环境变量PORT读取或8899）")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     args = parser.parse_args()
