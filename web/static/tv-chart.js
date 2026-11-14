@@ -352,11 +352,14 @@
       var list = barsResult[type];
       if (!list) return;
       list.forEach(function (item) {
-        if (item.points && item.points[0] && item.points[0].time >= from) {
+        if (!item || !item.points) return;
+        // 线类/中枢/分型的 points 是数组;买卖点(mmds)/背驰(bcs)的 points 是单对象
+        var pt = Array.isArray(item.points) ? item.points[0] : item.points;
+        if (pt && pt.time >= from) {
           var key = JSON.stringify(item);
           var existed = cc[type].some(function (x) { return x.key === key; });
           if (existed) return;
-          cc[type].push({ time: item.points[0].time, key: key, id: drawFn(chart, item) });
+          cc[type].push({ time: pt.time, key: key, id: drawFn(chart, item) });
         }
       });
     }
