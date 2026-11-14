@@ -354,12 +354,20 @@
       list.forEach(function (item) {
         if (!item || !item.points) return;
         // 线类/中枢/分型的 points 是数组;买卖点(mmds)/背驰(bcs)的 points 是单对象
-        var pt = Array.isArray(item.points) ? item.points[0] : item.points;
-        if (pt && pt.time >= from) {
+        var times;
+        if (Array.isArray(item.points)) {
+          times = item.points.map(function (p) { return (p && p.time) || 0; });
+        } else {
+          times = [item.points.time];
+        }
+        // 区间相交过滤: 元素最晚时间 >= 视口左边界即画(超出部分 TV 自行裁剪)。
+        // 若按起点过滤,起点在视口外的长中枢/长笔会被整根错误隐藏
+        var lastTime = Math.max.apply(null, times);
+        if (lastTime >= from) {
           var key = JSON.stringify(item);
           var existed = cc[type].some(function (x) { return x.key === key; });
           if (existed) return;
-          cc[type].push({ time: pt.time, key: key, id: drawFn(chart, item) });
+          cc[type].push({ time: lastTime, key: key, id: drawFn(chart, item) });
         }
       });
     }

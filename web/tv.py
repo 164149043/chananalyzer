@@ -167,16 +167,23 @@ def _build_cl_chart_data(code: str, kl_type: str) -> Optional[dict]:
             "linestyle": "0",
         })
 
-    # 分型: text="ding"顶(红)/"di"底(蓝),与 chanlun-pro 前端约定一致
+    # 分型: text="ding"顶(红)/"di"底(蓝),与 chanlun-pro 前端约定一致。
+    # 只保留构成笔端点的分型(全量识别分型数量是笔的~4倍,视觉噪音大)
+    bi_times = set()
+    for bi in bis:
+        bi_times.add(bi["points"][0]["time"])
+        bi_times.add(bi["points"][1]["time"])
     fxs = []
     for fx in analysis.get("fx_list", []):
-        fxs.append({
-            "points": [
-                {"time": _to_unix(fx["date"]), "price": fx["price"]},
-                {"time": _to_unix(fx["date"]), "price": fx["price"]},
-            ],
-            "text": fx["type"],
-        })
+        t = _to_unix(fx["date"])
+        if t in bi_times:
+            fxs.append({
+                "points": [
+                    {"time": t, "price": fx["price"]},
+                    {"time": t, "price": fx["price"]},
+                ],
+                "text": fx["type"],
+            })
 
     # 买卖点: CChan 类型值(1/1p/2/2s/3a/3b) + 买B/卖S方向后缀,如 "2B" "2sS"
     mmds = []
