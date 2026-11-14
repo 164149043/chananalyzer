@@ -1,331 +1,215 @@
 """
-K线数据更新脚本
+K线数据日更脚本(tdx版) — 每日收盘后更新本地 K 线缓存
 
-用于定时更新本地缓存的 K 线数据。
+用法:
+    python -m scripts.update_data --codes 000001 000002   # 更新指定股票
+    python -m scripts.update_data --all                    # 更新库内全部股票(约40分钟)
+    python -m scripts.update_data --all --skip-week        # 只更日线
 
-使用方法:
-    # 更新指定股票
-    python -m scripts.update_data --codes 000001 000002
+行为(2026-11 从 Tushare 增量模式切换为 tdx 全量重算式):
+- DAY : tdx 拉前复权日线(含自愈复权) → 删旧插新(全量重算)。
+        QFQ 复权是全量重算式——当日有除权事件时全历史因子变化,增量拼接会产生
+        拼接断裂(Tushare 时代 44/50 抽样股假跳空的根因),故每日全量重算,永不拼接。
+- WEEK: 从复权后的 DAY 按周聚合合成(首开/末收/最高/最低/量额求和),
+        复权一致性由 DAY 保证,不独立拉取(tdx 周线的除权事件对齐有坑)。
+- 新股票(库内无 DAY 数据)全量插入,不做深度对齐截断。
+- 断点续跑: 进度存 scripts/_update_progress.json。
+- 运行时机: 交易日 15:10 之后(tdx 收盘后日线完整);盘中运行会拿到当日实时未收盘K线。
 
-    # 更新所有已缓存的股票
-    python -m scripts.update_data --all
-
-    # 更新特定周期
-    python -m scripts.update_data --codes 000001 --kl-types DAY WEEK
-
-    # 清除缓存后重新获取
-    python -m scripts.update_data --codes 000001 --refresh
+注意: 旧 Tushare 版已废弃,不要再用旧逻辑向库内写 K线(会污染 tdx 复权数据)。
 """
 import argparse
-import logging
-import os
+import json
 import sys
-from datetime import datetime, timedelta
-from typing import List
-
-# ==================== 修复 tushare 权限问题 ====================
-# 强制使用 /tmp 目录存储 token，避免云服务器权限问题
-os.environ['TUSHARE_PATH'] = '/tmp'
-
-# Monkey patch tushare，在导入时立即生效
-import pandas as pd
-import tushare as ts
-
-# 保存原始函数
-_original_set_token = ts.set_token
-_original_pro_api = ts.pro_api
-
-def _patched_set_token(token):
-    """修复后的 set_token，使用 /tmp 目录"""
-    fp = '/tmp/tk.csv'
-    # 先删除旧文件避免权限冲突
-    if os.path.exists(fp):
-        try:
-            os.remove(fp)
-        except:
-            pass
-    df = pd.DataFrame({'token': [token]})
-    df.to_csv(fp, index=False)
-    ts._Tushare__token = token
-
-def _patched_pro_api(token=None):
-    """修复后的 pro_api，从 /tmp 读取 token"""
-    if token:
-        return _original_pro_api(token=token)
-    fp = '/tmp/tk.csv'
-    if os.path.exists(fp):
-        df = pd.read_csv(fp)
-        token = df['token'][0]
-        return _original_pro_api(token=token)
-    return _original_pro_api()
-
-# 应用 patch
-ts.set_token = _patched_set_token
-ts.pro_api = _patched_pro_api
-# ==================== 修复结束 ====================
-
-try:
-    from tqdm import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
-    tqdm = lambda x, **kwargs: x
-
 import time
+from datetime import datetime
+from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from Common.CEnum import KL_TYPE
-from ChanAnalyzer.database import get_db, init_db, KLineData, get_kl_type_str
-from ChanAnalyzer.data_manager import DataManager
-from DataAPI.TushareAPI import CTushareAPI
+# Windows 控制台/重定向默认 GBK,强制 UTF-8
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from ChanAnalyzer.database import get_db, KLineData
+from ChanAnalyzer.tdx_source import TdxSource
 
+PROGRESS_FILE = Path(__file__).parent / "_update_progress.json"
 
-def _log(msg):
-    """日志输出（兼容 tqdm）"""
-    if HAS_TQDM:
-        tqdm.write(msg)
-    else:
-        logger.info(msg)
+DATE_FMT_DAY = "%Y/%m/%d %H:%M:%S"    # DAY 行 date 格式(与重播种一致,15:00 时间戳)
+DATE_FMT_WEEK = "%Y/%m/%d"            # WEEK 行 date 格式(与库内历史 WEEK 一致)
 
 
-def update_stock(
-    code: str,
-    kl_types: List[KL_TYPE],
-    data_manager: DataManager,
-    refresh: bool = False,
-    verbose: bool = False,
-    silent: bool = False
-) -> dict:
-    """
-    更新单只股票的数据
-
-    Returns:
-        更新结果统计
-    """
-    result = {
-        "code": code,
-        "success": True,
-        "kl_types": {},
-        "error": None
-    }
-
-    for kl_type in kl_types:
-        kl_type_str = get_kl_type_str(kl_type)
-
+def load_progress() -> set:
+    if PROGRESS_FILE.exists():
         try:
-            # 清除缓存（如果需要）
-            if refresh and verbose:
-                _log(f"[{code} {kl_type_str}] 清除旧缓存...")
-                data_manager.clear_cache(code, kl_type)
-            elif refresh:
-                data_manager.clear_cache(code, kl_type)
-
-            # 获取昨天到今天的数据（增量更新）
-            end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
-
-            # 创建数据源获取函数
-            def fetcher(code, kl_type, begin, end):
-                api = CTushareAPI(
-                    code=code,
-                    k_type=kl_type,
-                    begin_date=begin,
-                    end_date=end,
-                    autype=None  # 不复权
-                )
-                return api.get_kl_data()
-
-            if verbose:
-                _log(f"[{code} {kl_type_str}] 开始更新...")
-
-            data_manager.get_kl_data(
-                code=code,
-                kl_type=kl_type,
-                begin_date=start_date,
-                end_date=end_date,
-                data_src_fetcher=fetcher
-            )
-
-            # 获取缓存信息
-            info = data_manager.get_cache_info(code, kl_type)
-            result["kl_types"][kl_type_str] = {
-                "count": info.get("count", 0),
-                "first_date": info.get("first_date"),
-                "last_date": info.get("last_date"),
-            }
-            if not silent:
-                logger.info(f"[{code} {kl_type_str}] 更新成功: {info.get('count', 0)} 条")
-
-        except Exception as e:
-            if not silent:
-                logger.error(f"[{code} {kl_type_str}] 更新失败: {e}")
-            result["kl_types"][kl_type_str] = {"error": str(e)}
-            result["success"] = False
-
-    return result
+            return set(json.loads(PROGRESS_FILE.read_text(encoding="utf-8")))
+        except Exception:
+            return set()
+    return set()
 
 
-def get_all_cached_stocks() -> List[str]:
-    """获取所有已缓存的股票代码"""
+def save_progress(done: set):
+    PROGRESS_FILE.write_text(json.dumps(sorted(done)), encoding="utf-8")
+
+
+def build_week_from_day(day_df):
+    """从复权日线合成周线:ISO周聚合,date=该周最后交易日"""
+    df = day_df.reset_index(drop=True)
+    rows = []
+    for _key, g in _group_weeks(df):
+        last = g.iloc[-1]
+        dt = last["date"]
+        rows.append({
+            "date_str": dt.strftime(DATE_FMT_WEEK),
+            "timestamp": dt.replace(hour=0, minute=0, second=0, microsecond=0),
+            "open": float(g.iloc[0]["open"]),
+            "close": float(last["close"]),
+            "high": float(g["high"].max()),
+            "low": float(g["low"].min()),
+            "volume": float(g["volume"].sum()),
+            "amount": round(float(g["amount"].sum()), 2) if "amount" in g else None,
+        })
+    return rows
+
+
+def _group_weeks(df):
+    """按 (ISO年, ISO周) 分组迭代器"""
+    iso = df["date"].dt.isocalendar()
+    keys = list(zip(iso["year"].astype(int), iso["week"].astype(int)))
+    groups = {}
+    order = []
+    for i, k in enumerate(keys):
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(i)
+    for k in order:
+        yield k, df.iloc[groups[k]]
+
+
+def update_one(src: TdxSource, code: str, with_week: bool = True) -> tuple:
+    """更新单只股票。返回 (code, ok, day_rows, week_rows, msg)"""
     with get_db() as db:
-        codes = db.query(KLineData.code).distinct().all()
-        return [c[0] for c in codes]
-
-
-def update_all_stocks(
-    kl_types: List[KL_TYPE],
-    data_manager: DataManager,
-    refresh: bool = False
-):
-    """更新所有已缓存的股票"""
-    codes = get_all_cached_stocks()
-
-    if not codes:
-        logger.warning("没有已缓存的股票，请先使用 --codes 指定股票代码")
-        return
-
-    logger.info(f"开始更新 {len(codes)} 只股票...")
-
-    success_count = 0
-    fail_count = 0
-
-    if HAS_TQDM:
-        # 抑制 DataManager 内部日志，避免打断 tqdm 显示
-        dm_logger = logging.getLogger('ChanAnalyzer.data_manager')
-        original_level = dm_logger.level
-        dm_logger.setLevel(logging.CRITICAL)
-
-        # 两行显示：上方显示当前股票数据（原地更新），下方显示进度条
-        info_bar = tqdm(
-            total=len(codes), position=0,
-            bar_format='{desc}',
-            leave=True
+        first = (
+            db.query(KLineData)
+            .filter(KLineData.code == code, KLineData.kl_type == "DAY")
+            .order_by(KLineData.timestamp.asc())
+            .first()
         )
-        pbar = tqdm(
-            codes, desc="更新进度", unit="股",
-            position=1, leave=True
-        )
-    else:
-        info_bar = None
-        pbar = codes
+    min_date = first.timestamp if first else None  # None=新股票,全量插入
 
-    for code in (pbar if HAS_TQDM else codes):
-        result = update_stock(code, kl_types, data_manager, refresh, silent=HAS_TQDM)
+    qfq = src.get_daily_qfq(code, pages=3)  # 2100根 ≈ 8.5年,覆盖库内深度并留余量
+    if qfq is None or len(qfq) == 0:
+        return code, False, 0, 0, "tdx 拉取失败"
+    if min_date is not None:
+        qfq = qfq[qfq["date"] >= pd_ts(min_date)]  # 深度对齐,计算负载不变
+        if len(qfq) == 0:
+            return code, False, 0, 0, "tdx 数据均早于库内起点"
 
-        if result["success"]:
-            success_count += 1
-        else:
-            fail_count += 1
+    day_rows = []
+    for _, r in qfq.iterrows():
+        dt = r["date"].to_pydatetime().replace(hour=15, minute=0, second=0, microsecond=0)
+        day_rows.append(KLineData(
+            code=code, kl_type="DAY",
+            date=dt.strftime(DATE_FMT_DAY),
+            timestamp=dt,
+            open=float(r["open"]), high=float(r["high"]),
+            low=float(r["low"]), close=float(r["close"]),
+            volume=float(r["volume"]) if r["volume"] else 0,
+            amount=round(float(r["amount"]), 2) if r.get("amount") else None,
+            turnover_rate=None,
+        ))
 
-        # 构建信息字符串
-        parts = []
-        for kl_str, info in result["kl_types"].items():
-            if "error" in info:
-                parts.append(f"{kl_str}:失败")
-            else:
-                parts.append(f"{kl_str}:{info['count']}条")
+    week_rows = []
+    if with_week:
+        for w in build_week_from_day(qfq):
+            week_rows.append(KLineData(
+                code=code, kl_type="WEEK",
+                date=w["date_str"], timestamp=w["timestamp"],
+                open=w["open"], high=w["high"], low=w["low"], close=w["close"],
+                volume=w["volume"], amount=w["amount"], turnover_rate=None,
+            ))
 
-        status = "✓" if result["success"] else "✗"
+    with get_db() as db:
+        db.query(KLineData).filter(
+            KLineData.code == code, KLineData.kl_type == "DAY"
+        ).delete(synchronize_session=False)
+        if with_week:
+            db.query(KLineData).filter(
+                KLineData.code == code, KLineData.kl_type == "WEEK"
+            ).delete(synchronize_session=False)
+        db.add_all(day_rows)
+        db.add_all(week_rows)
+        db.commit()
+    return code, True, len(day_rows), len(week_rows), ""
 
-        if HAS_TQDM:
-            info_bar.set_description_str(
-                f"  {status} {code}  {' | '.join(parts)}  "
-                f"(成功:{success_count} 失败:{fail_count})"
-            )
-            pbar.set_postfix(成功=success_count, 失败=fail_count)
-        else:
-            print(f"{status} {code}  {' | '.join(parts)}")
 
-        # API 频率限制：每只股票之间延迟 0.2 秒
-        time.sleep(0.2)
-
-    if HAS_TQDM:
-        info_bar.close()
-        pbar.close()
-        # 恢复日志级别
-        dm_logger.setLevel(original_level)
-
-    print(f"\n更新完成: 成功 {success_count}, 失败 {fail_count}")
+def pd_ts(dt):
+    """datetime → pandas Timestamp(lazy import 避免顶层依赖)"""
+    import pandas as pd
+    return pd.Timestamp(dt)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="K线数据更新脚本")
-
-    parser.add_argument(
-        '--codes',
-        nargs='+',
-        help='指定股票代码，如: 000001 000002'
-    )
-    parser.add_argument(
-        '--all',
-        action='store_true',
-        help='更新所有已缓存的股票'
-    )
-    parser.add_argument(
-        '--kl-types',
-        nargs='+',
-        default=['DAY', 'WEEK'],
-        choices=['DAY', 'WEEK', 'MON', '30M', '15M', '5M', '1M'],
-        help='K线周期类型 (默认: DAY WEEK)'
-    )
-    parser.add_argument(
-        '--refresh',
-        action='store_true',
-        help='清除缓存后重新获取'
-    )
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='显示详细日志'
-    )
-
+    parser = argparse.ArgumentParser(description="K线日更(tdx全量重算式)")
+    parser.add_argument("--all", action="store_true", help="更新库内全部股票")
+    parser.add_argument("--codes", nargs="*", help="指定股票代码(可新增股票)")
+    parser.add_argument("--limit", type=int, help="限制数量(试跑)")
+    parser.add_argument("--skip-week", action="store_true", help="跳过周线合成")
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-
-    # 初始化数据库
-    init_db()
-
-    # 创建 DataManager 实例
-    data_manager = DataManager()
-
-    # 解析周期类型
-    kl_type_map = {
-        '1M': KL_TYPE.K_1M,
-        '5M': KL_TYPE.K_5M,
-        '15M': KL_TYPE.K_15M,
-        '30M': KL_TYPE.K_30M,
-        'DAY': KL_TYPE.K_DAY,
-        'WEEK': KL_TYPE.K_WEEK,
-        'MON': KL_TYPE.K_MON,
-    }
-    kl_types = [kl_type_map[t] for t in args.kl_types]
-
-    # 执行更新
-    if args.all:
-        update_all_stocks(kl_types, data_manager, args.refresh)
-    elif args.codes:
-        for code in args.codes:
-            result = update_stock(code, kl_types, data_manager, args.refresh)
-            print(f"\n{code} 更新结果:")
-            for kl_type_str, info in result["kl_types"].items():
-                if "error" in info:
-                    print(f"  {kl_type_str}: 失败 - {info['error']}")
-                else:
-                    print(f"  {kl_type_str}: {info['count']} 条 ({info['first_date']} ~ {info['last_date']})")
+    if args.codes:
+        codes = [c.zfill(6) for c in args.codes]
     else:
-        parser.print_help()
-        print("\n提示: 使用 --codes 指定股票，或 --all 更新所有已缓存股票")
+        with get_db() as db:
+            codes = [
+                r[0] for r in db.query(KLineData.code)
+                .filter(KLineData.kl_type == "DAY").distinct().all()
+            ]
+        if not args.all and not args.limit:
+            print("未指定 --all 或 --codes。试跑加 --limit 10,全量加 --all")
+            return
+        if args.limit:
+            codes = codes[:args.limit]
+
+    done = load_progress()
+    print(f"目标 {len(codes)} 只,已完成 {len(done & set(codes))} 只(断点跳过),周线{'跳过' if args.skip_week else '合成'}")
+
+    src = TdxSource()
+    failed, t0 = [], time.time()
+    try:
+        for code in codes:
+            if code in done:
+                continue
+            try:
+                _, ok, nd, nw, msg = update_one(src, code, with_week=not args.skip_week)
+            except Exception as e:
+                ok, nd, nw, msg = False, 0, 0, f"{type(e).__name__}: {str(e)[:60]}"
+            if ok:
+                done.add(code)
+                if len(done) % 100 == 0:
+                    save_progress(done)
+                    speed = len(done) / max(1, time.time() - t0) * 3600
+                    print(f"[{len(done)}/{len(codes)}] {code} OK DAY{nd} WEEK{nw} | 速率≈{speed:.0f}只/时")
+            else:
+                failed.append((code, msg))
+                print(f"[FAIL] {code}: {msg}")
+            time.sleep(0.15)  # 温和限速
+    except KeyboardInterrupt:
+        print("\n中断,进度已保存")
+    finally:
+        save_progress(done)
+        src.close()
+
+    print(f"\n完成 {len(done)}/{len(codes)},失败 {len(failed)}")
+    if failed:
+        (Path(__file__).parent / "_update_failed.json").write_text(
+            json.dumps(failed, ensure_ascii=False, indent=1), encoding="utf-8")
+        print("失败清单 → scripts/_update_failed.json")
+    if len(done) == len(codes):
+        PROGRESS_FILE.unlink(missing_ok=True)
+        print("全部完成,断点文件已清除")
 
 
 if __name__ == "__main__":
