@@ -1595,11 +1595,18 @@ async def get_stock_signals(code: str, user_id: int = Depends(get_current_user))
 
 @app.get("/api/stock/resolve")
 async def resolve_stock(q: str = "", user_id: int = Depends(get_current_user)):
-    """代码/名称 -> 标准代码+名称(轻量,供 TV 图表入口等前端使用)"""
+    """代码/名称 -> 标准代码+名称(轻量,供 TV 图表入口等前端使用)
+    A股优先;未命中再匹配 OKX 白名单币(输入 btc / BTC-USDT 直达)"""
     resolved_code, resolved_name, success = resolve_stock_code(q)
-    if not success:
-        return {"error": f"未找到股票: {q}"}
-    return {"code": resolved_code, "name": resolved_name}
+    if success:
+        return {"code": resolved_code, "name": resolved_name, "market": "a"}
+    # OKX 币: 精确 instId 或 base 简名匹配(如 btc -> BTC-USDT)
+    from ChanAnalyzer.okx_cache import _whitelist
+    uq = q.strip().upper()
+    for inst in sorted(_whitelist()):
+        if uq == inst or uq == inst.split("-")[0]:
+            return {"code": inst, "name": inst.split("-")[0], "market": "okx"}
+    return {"error": f"未找到股票: {q}"}
 
 
 def get_stock_name_by_code(code: str) -> str:
@@ -1695,10 +1702,32 @@ class AnalyzeRequest(BaseModel):
     """分析请求"""
     code: str
     temperatures: Optional[Dict[str, float]] = None
+    period: Optional[str] = None  # 分析周期(仅币生效): 1M/5M/15M/30M/60M/4H/DAY/WEEK
+
+
+# 币分析周期: 请求字符串 -> 缠论引擎枚举
+_OKX_PERIOD_ENUM = None  # 延迟初始化(需等 sys.path 就绪)
+
+
+def _okx_period_enum_map() -> dict:
+    global _OKX_PERIOD_ENUM
+    if _OKX_PERIOD_ENUM is None:
+        from Common.CEnum import KL_TYPE
+        _OKX_PERIOD_ENUM = {
+            "1M": KL_TYPE.K_1M, "5M": KL_TYPE.K_5M, "15M": KL_TYPE.K_15M,
+            "30M": KL_TYPE.K_30M, "60M": KL_TYPE.K_60M, "4H": KL_TYPE.K_4H,
+            "DAY": KL_TYPE.K_DAY, "WEEK": KL_TYPE.K_WEEK,
+        }
+    return _OKX_PERIOD_ENUM
+
+
+_PERIOD_CN = {"1M": "1分钟", "5M": "5分钟", "15M": "15分钟", "30M": "30分钟",
+              "60M": "60分钟", "4H": "4小时", "DAY": "日线", "WEEK": "周线"}
 
 
 async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None,
-                               user_id: Optional[int] = None, charged: bool = False):
+                               user_id: Optional[int] = None, charged: bool = False,
+                               period: Optional[str] = None):
     """
     流式输出分析结果 (SSE) - 纯异步实现
 
@@ -1710,40 +1739,80 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None,
         temperatures: 温度配置 {analyst_a: 0.3, analyst_b: 0.6, decision_maker: 0.3}
         user_id: 调用者 id（用于失败返还次数）
         charged: 本次是否已预扣次数（admin 未扣则不返还）
+        period: 分析周期(仅币生效,非法值回退日线;A股固定日线)
     """
     import time
     tasks: List[asyncio.Task] = []
 
     try:
-        # 0. 解析股票代码/名称
+        # 0. 解析股票代码/名称(A股优先;未命中匹配 OKX 白名单币)
+        market = "a"
         resolved_code, resolved_name, success = resolve_stock_code(code)
         if not success:
-            yield f"data: {json.dumps({'event': 'error', 'message': f'未找到股票: {code}'})}\n\n"
-            return
+            from ChanAnalyzer.okx_cache import _whitelist, ensure_okx
+            uq = code.strip().upper()
+            okx_code = next((inst for inst in sorted(_whitelist())
+                             if uq == inst or uq == inst.split("-")[0]), None)
+            if okx_code is None:
+                yield f"data: {json.dumps({'event': 'error', 'message': f'未找到股票: {code}'})}\n\n"
+                return
+            market, code, resolved_name = "okx", okx_code, okx_code.split("-")[0]
 
-        code = resolved_code
+        code = resolved_code if market == "a" else code
         stock_display_name = f"{resolved_name} ({code})" if resolved_name else code
 
-        # 1. 获取缠论分析数据
+        # 周期: 仅币生效(白名单校验,非法回退日线);A股固定日线
+        kl_period = "DAY"
+        if market == "okx":
+            req_period = (period or "DAY").strip().upper()
+            kl_period = req_period if req_period in _okx_period_enum_map() else "DAY"
+
+        yield f"data: {json.dumps({'event': 'meta', 'market': market, 'code': code,
+                                   'name': resolved_name or code, 'period': kl_period,
+                                   'period_cn': _PERIOD_CN[kl_period]})}\n\n"
+
+        # 1. 获取缠论分析数据(币: 按所选周期按需拉取+新鲜度兜底——只调 ensure_okx
+        #    的话已有缓存永不刷新,AI 会基于旧数据分析;首拉/增量都是网络IO,放线程池)
+        if market == "okx":
+            from starlette.concurrency import run_in_threadpool
+            from ChanAnalyzer.database import KLineData
+            from ChanAnalyzer.okx_cache import OKX_MARKET, ensure_okx_fresh
+
+            def _ensure_okx_period():
+                ensure_okx(code, kl_period)
+                with get_db() as db:
+                    last = (
+                        db.query(KLineData.timestamp)
+                        .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                                KLineData.kl_type == kl_period)
+                        .order_by(KLineData.timestamp.desc())
+                        .first()
+                    )
+                if last and last[0]:
+                    ensure_okx_fresh(code, kl_period, last[0])
+
+            await run_in_threadpool(_ensure_okx_period)
         ChanAnalyzer = import_chan_analyzer()
-        analyzer = ChanAnalyzer(code=code)
+        analyzer = ChanAnalyzer(code=code, levels=[_okx_period_enum_map()[kl_period]])
         analysis = analyzer.get_analysis()
 
-        # 2. 获取资金流向
+        # 2. 获取资金流向(A股专属,币跳过)
         money_flow = None
-        try:
-            sector_flow = import_sector_flow()
-            money_flow = sector_flow.get_stock_money_flow(code, days=5)
-        except Exception as e:
-            print(f"资金流向获取失败: {e}")
+        if market == "a":
+            try:
+                sector_flow = import_sector_flow()
+                money_flow = sector_flow.get_stock_money_flow(code, days=5)
+            except Exception as e:
+                print(f"资金流向获取失败: {e}")
 
-        # 2.5 获取实时行情（仅交易时段）
+        # 2.5 获取实时行情（仅A股交易时段;币跳过）
         realtime_quote = None
-        try:
-            from ChanAnalyzer.realtime_quote import get_realtime_quote
-            realtime_quote = get_realtime_quote(code)
-        except Exception as e:
-            print(f"实时行情获取失败: {e}")
+        if market == "a":
+            try:
+                from ChanAnalyzer.realtime_quote import get_realtime_quote
+                realtime_quote = get_realtime_quote(code)
+            except Exception as e:
+                print(f"实时行情获取失败: {e}")
 
         # 3. 创建多AI分析器
         MultiAIAnalyzer = import_multi_ai_analyzer()
@@ -1771,8 +1840,8 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None,
         async def run_analyst_stream(analyst_id: int, temperature: float):
             """流式调用分析师，将 chunk 放入队列"""
             try:
-                system_prompt = get_analyst_system_prompt()
-                user_prompt = get_analyst_user_prompt(analysis_data, analyst_id + 1)
+                system_prompt = get_analyst_system_prompt(market)
+                user_prompt = get_analyst_user_prompt(analysis_data, analyst_id + 1, market)
                 response = await ai_analyzer.async_client.chat.completions.create(
                     model=models[analyst_id] if analyst_id < len(models) else models[-1],
                     messages=[
@@ -1853,8 +1922,8 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None,
                 opinion=analyst_opinions[1]
             )
         ]
-        decision_system = get_decision_maker_system_prompt()
-        decision_prompt = get_decision_maker_user_prompt(opinion_objects)
+        decision_system = get_decision_maker_system_prompt(market)
+        decision_prompt = get_decision_maker_user_prompt(opinion_objects, market)
 
         decision_full = ""
         chunk_queue = asyncio.Queue()  # 新队列，避免残留
@@ -1964,6 +2033,7 @@ async def analyze_stock(request: AnalyzeRequest, user_id: int = Depends(get_curr
             temperatures=request.temperatures,
             user_id=user_id,
             charged=charged,
+            period=request.period,
         ),
         media_type="text/event-stream",
         headers={

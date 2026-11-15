@@ -36,6 +36,8 @@ KL_TYPE_NAME = {
     KL_TYPE.K_5M: "5分钟",
     KL_TYPE.K_15M: "15分钟",
     KL_TYPE.K_30M: "30分钟",
+    KL_TYPE.K_60M: "60分钟",
+    KL_TYPE.K_4H: "4小时",
     KL_TYPE.K_DAY: "日线",
     KL_TYPE.K_WEEK: "周线",
     KL_TYPE.K_MON: "月线",

@@ -1,4 +1,4 @@
-"""分析师提示词模板"""
+"""分析师提示词模板(A股/加密货币双市场)"""
 
 ANALYST_SYSTEM_PROMPT = """你是一位专业的股票技术分析师，精通缠论理论，请根据以下缠论数据给出交易策略。
 
@@ -15,15 +15,36 @@ ANALYST_SYSTEM_PROMPT = """你是一位专业的股票技术分析师，精通�
 
 你的分析应包含：方向判断、关键价位、风险点等。"""
 
+CRYPTO_ANALYST_SYSTEM_PROMPT = """你是一位专业的加密货币技术分析师，精通缠论理论，请根据以下缠论数据给出交易策略。
 
-def get_analyst_system_prompt() -> str:
-    """获取分析师系统提示词"""
-    return ANALYST_SYSTEM_PROMPT
+## 市场特性(与股票不同,必须纳入分析)
+- 该标的为 OKX 现货,7×24 小时连续交易,无涨跌停、无集合竞价,无"收盘"断层
+- 波动率显著高于股票,趋势加速与反转都更剧烈,仓位与止损判断需更保守
+- 价格驱动主要来自美股/宏观流动性(美联储、美债)、链上资金流与行业事件,而非板块轮动
+- 周末与美盘时段(北京 21:00-次日 5:00)波动往往放大
+
+## 核心原则
+1. **数据优先**：你必须以缠论数据中的买卖点信号为事实依据，不得与数据矛盾
+2. **数据中已通过缠论算法检测出的买卖点是客观事实**，你的分析必须以此为基础
+
+## 数据说明
+- 「笔结构」「线段结构」表格中的"买卖点"列与「近期买卖点信号」，均由缠论算法检测得出，属于客观事实
+- "背驰标注"是同向笔 MACD 力度对比的简化判断，供参考
+- "最新两中枢位置关系"是趋势判断的直接依据：上涨趋势（中枢上移）以逢低做多为主，下跌趋势（中枢下移）以反弹卖出为主，中枢扩展/震荡按区间高抛低吸
+- 中枢的 ZG/ZD 是支撑压力判断的关键价位
+
+你的分析应包含：方向判断、关键价位、风险点等。"""
+
+
+def get_analyst_system_prompt(market: str = "a") -> str:
+    """获取分析师系统提示词(market: 'a'=A股 / 'okx'=加密货币)"""
+    return CRYPTO_ANALYST_SYSTEM_PROMPT if market == "okx" else ANALYST_SYSTEM_PROMPT
 
 
 def get_analyst_user_prompt(
     analysis_data: str,
-    analyst_id: int
+    analyst_id: int,
+    market: str = "a",
 ) -> str:
     """
     生成分析师用户提示词
@@ -31,13 +52,12 @@ def get_analyst_user_prompt(
     Args:
         analysis_data: 格式化的缠论数据
         analyst_id: 分析师ID
-
-    Returns:
-        完整的用户提示词
+        market: 'a'=A股 / 'okx'=加密货币
     """
-    return f"""你是对股票进行缠论分析的分析师{analyst_id + 1}。
+    subject = "加密货币" if market == "okx" else "股票"
+    return f"""你是对{subject}进行缠论分析的分析师{analyst_id + 1}。
 
-以下是该股票的缠论分析数据，其中买卖点已通过缠论算法计算得出（内联标注在笔/线段表格中，并有近期信号汇总）：
+以下是该{subject}的缠论分析数据，其中买卖点已通过缠论算法计算得出（内联标注在笔/线段表格中，并有近期信号汇总）：
 
 {analysis_data}
 
