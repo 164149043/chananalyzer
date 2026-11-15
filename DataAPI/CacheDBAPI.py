@@ -63,15 +63,17 @@ def _create_item_dict(row: tuple, autype: AUTYPE) -> dict:
     except ValueError:
         dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
 
-    # 分钟线保留真实时分(bar开始时刻);日线/周线保持 0:00,
-    # 使 klu.time.to_str() 维持 "YYYY/MM/DD" 纯日期格式(前端/坐标约定依赖此格式)
-    if row[1] in ("5M", "15M", "30M", "60M"):
-        hour, minute = dt.hour, dt.minute
+    # 分钟线保留真实时分(bar开始时刻)且 auto=False——加密货币 7x24 存在北京 0:00 起的
+    # bar,CTime 的 auto 语义会把 0:00 当"日线"解释为当天 23:59:59,导致下一根 0:15 的
+    # klu 时间"倒退"触发 kline time err(A股交易时段无 0:00 bar,从未触发)。
+    # 日线/周线保持 0:00 + auto=True(现状),使 klu.time.to_str() 维持纯日期格式
+    if row[1] in ("1M", "5M", "15M", "30M", "60M", "4H"):
+        klu_time = CTime(dt.year, dt.month, dt.day, dt.hour, dt.minute, auto=False)
     else:
-        hour, minute = 0, 0
+        klu_time = CTime(dt.year, dt.month, dt.day, 0, 0)
 
     item = {
-        DATA_FIELD.FIELD_TIME: CTime(dt.year, dt.month, dt.day, hour, minute),
+        DATA_FIELD.FIELD_TIME: klu_time,
         DATA_FIELD.FIELD_OPEN: float(row[4]),   # open
         DATA_FIELD.FIELD_HIGH: float(row[5]),   # high
         DATA_FIELD.FIELD_LOW: float(row[6]),    # low
@@ -274,6 +276,10 @@ class CCacheDBAPI(CCommonStockApi):
             return "15M"
         elif self.k_type == KL_TYPE.K_30M:
             return "30M"
+        elif self.k_type == KL_TYPE.K_1M:
+            return "1M"
+        elif self.k_type == KL_TYPE.K_4H:
+            return "4H"
         elif self.k_type == KL_TYPE.K_60M:
             return "60M"
         else:

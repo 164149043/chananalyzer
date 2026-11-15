@@ -49,6 +49,26 @@ def init_db():
     _migrate_users_email()
     _migrate_users_token_version()
     _migrate_users_usage()
+    _migrate_kline_market()
+
+
+def _migrate_kline_market():
+    """幂等迁移：kline_data 补 market 列('a'=A股 / 'okx'=OKX,存量自动归'a')
+
+    不改唯一约束(code,kl_type,date)——A股6位数字与币'XXX-USDT'命名空间天然
+    不重叠,旧约束依然完整防重;只补普通索引(market,code,kl_type)加速过滤。
+    SQLite ADD COLUMN+DEFAULT 不重写表,500万行秒级完成。
+    """
+    insp = inspect(engine)
+    if not insp.has_table('kline_data'):
+        return  # 全新部署：create_all 已建含该列的完整表
+    if 'market' in [c['name'] for c in insp.get_columns('kline_data')]:
+        return  # 已迁移
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE kline_data ADD COLUMN market VARCHAR(8) NOT NULL DEFAULT 'a'"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_market_code_kltype ON kline_data(market, code, kl_type)"
+        ))
 
 
 def _migrate_users_membership():
@@ -109,7 +129,8 @@ class KLineData(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # 股票信息
-    code = Column(String(10), nullable=False, index=True)  # 股票代码，如 000001
+    market = Column(String(8), nullable=False, default='a')  # 市场: 'a'=A股 / 'okx'=OKX加密货币
+    code = Column(String(10), nullable=False, index=True)  # 股票代码，如 000001；币如 BTC-USDT
     kl_type = Column(String(10), nullable=False, index=True)  # 周期类型: DAY, WEEK, MON 等
 
     # 时间
@@ -133,11 +154,13 @@ class KLineData(Base):
     __table_args__ = (
         UniqueConstraint('code', 'kl_type', 'date', name='uix_code_kltype_date'),
         Index('idx_code_kltype_timestamp', 'code', 'kl_type', 'timestamp'),
+        Index('idx_market_code_kltype', 'market', 'code', 'kl_type'),
     )
 
     def to_dict(self) -> dict:
         """转换为字典"""
         return {
+            'market': self.market,
             'code': self.code,
             'kl_type': self.kl_type,
             'date': self.date,
@@ -191,6 +214,7 @@ KL_TYPE_NAME = {
     KL_TYPE.K_15M: "15M",
     KL_TYPE.K_30M: "30M",
     KL_TYPE.K_60M: "60M",
+    KL_TYPE.K_4H: "4H",
     KL_TYPE.K_DAY: "DAY",
     KL_TYPE.K_WEEK: "WEEK",
     KL_TYPE.K_MON: "MON",
