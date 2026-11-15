@@ -615,11 +615,24 @@
       flex-direction: column;
       gap: var(--space-xs);
       transition: all 0.2s ease;
+      cursor: pointer;  /* 点击打开 TV 图表 */
+    }
+
+    .stock-card:hover {
+      border-color: var(--border-medium);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
     }
 
     .stock-card:active {
       transform: scale(0.98);
       border-color: var(--border-medium);
+    }
+
+    .stock-card-link {
+      font-size: 0.72em;
+      color: var(--text-tertiary);
+      text-align: right;
+      margin-top: 2px;
     }
 
     .stock-header {
@@ -1206,7 +1219,18 @@
         <div class="card">
           <div class="card-title">股票代码/名称</div>
           <div class="input-group">
-            <input type="text" class="input-field" id="stockCode" placeholder="输入代码或名称，如 000001 或 平安银行" maxlength="20" value="000001">
+            <input type="text" class="input-field" id="stockCode" placeholder="输入代码或名称，如 000001 / 平安银行 / BTC" maxlength="20" value="000001">
+            <select id="analyzePeriod" class="input-field" title="AI分析周期（加密货币可选全部周期，A股暂为日线）"
+                    style="max-width:100px;flex:0 0 auto;cursor:pointer;">
+              <option value="1M">1分钟</option>
+              <option value="5M">5分钟</option>
+              <option value="15M">15分</option>
+              <option value="30M">30分</option>
+              <option value="60M">60分</option>
+              <option value="4H">4小时</option>
+              <option value="DAY" selected>日线</option>
+              <option value="WEEK">周线</option>
+            </select>
           </div>
           <div class="btn-group">
             <button class="btn btn-primary" id="tvChartBtn">📊 TV图表</button>
@@ -2151,6 +2175,16 @@
     // ============================================
     let currentEventSource = null;
 
+    // 扫描结果卡片 → TV 图表联动: 切到个股分析页并自动打开该股图表
+    window.openStockInTV = function (code) {
+      if (!code) return;
+      const tab = document.querySelector('.nav-tab[data-page="analysis"]');
+      if (tab) tab.click();
+      document.getElementById('stockCode').value = code;
+      const btn = document.getElementById('tvChartBtn');
+      if (btn) btn.click();
+    };
+
     // TradingView 图表按钮(懒加载资源,首次点击才拉取 ~30MB 图表库)
     document.getElementById('tvChartBtn')?.addEventListener('click', async () => {
       const q = document.getElementById('stockCode').value.trim();
@@ -2163,28 +2197,30 @@
       btn.disabled = true;
       btn.textContent = '加载中...';
       try {
-        // 名称输入先解析为标准代码
+        // 名称输入先解析为标准代码(A股优先,未命中匹配OKX白名单币)
         const res = await AuthManager.fetch(`/api/stock/resolve?q=${encodeURIComponent(q)}`);
         const info = await res.json();
         if (info.error) {
           alert(info.error);
           return;
         }
+        const isCrypto = info.market === 'okx';
         const card = document.getElementById('tvChartCard');
         card.style.display = 'block';
-        document.getElementById('tvChartHint').textContent = `${info.name} · 日线/周线 · 图上可搜索换股`;
+        document.getElementById('tvChartHint').textContent =
+          `${isCrypto ? 'OKX · ' + info.name + ' · 7×24' : info.name + ' · 日线/周线'} · 图上可搜索换股`;
         card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         // tv-chart.js 本体很小,直接加载;内部再懒加载 datafeed+charting_library
         if (!window.TVChart) {
           await new Promise((ok, err) => {
             const s = document.createElement('script');
-            s.src = '/static/tv-chart.js?v=2';
+            s.src = '/static/tv-chart.js?v=4';
             s.onload = ok;
             s.onerror = () => err(new Error('tv-chart.js 加载失败'));
             document.head.appendChild(s);
           }).catch(e => { alert(e.message); });
         }
-        if (window.TVChart) window.TVChart.open(info.code);
+        if (window.TVChart) window.TVChart.open(info.code, info.market || 'a');
       } finally {
         btn.disabled = false;
         btn.textContent = '📊 TV图表';
@@ -2210,8 +2246,10 @@
       btn.disabled = true;
       btn.textContent = '分析中...';
 
-      // 显示分析提示
+      // 显示分析提示(重置文本,meta事件到达后会带上标的/周期)
       document.getElementById('analyzeTip').style.display = 'flex';
+      const tipReset = document.getElementById('analyzeTip')?.querySelector('.tip-text');
+      if (tipReset) tipReset.textContent = '分析进行中，请勿切换页面...';
 
       // 重置输出区域
       document.getElementById('analystAOutput').innerHTML = '<div class="loading">分析中...</div>';
@@ -2231,6 +2269,7 @@
       const url = `${API_BASE}/stock/analyze`;
       const requestBody = {
         code: stockCode,
+        period: document.getElementById('analyzePeriod')?.value || 'DAY',
         temperatures: {
           analyst_a: tempA,
           analyst_b: tempB,
@@ -2429,6 +2468,17 @@
 
     function handleSSEEvent(data) {
       switch (data.event) {
+        case 'meta':
+          // 后端回传实际分析的市场/周期(A股固定日线;币按所选周期)
+          {
+            const tip = document.getElementById('analyzeTip')?.querySelector('.tip-text');
+            if (tip) {
+              tip.textContent = `分析进行中 · ${data.name || data.code} · ${data.period_cn || data.period}` +
+                (data.market === 'a' ? '（A股暂仅日线）' : '（OKX）') + '...';
+            }
+          }
+          break;
+
         case 'analyst_start':
           // 分析师开始分析，清空输出区域准备接收流式文字
           const startEl = data.analyst_id === 0
@@ -2853,7 +2903,7 @@
         const signalPrice = signal?.price || (stock.signals?.[0]?.price) || 0;
 
         return `
-          <div class="stock-card">
+          <div class="stock-card" onclick="openStockInTV('${stock.code}')" title="点击在 TV 图表查看 ${stock.name || stock.code}">
             <div class="stock-header">
               <span class="stock-code">${stock.code}</span>
               <span class="stock-name">${stock.name || ''}</span>
@@ -2874,6 +2924,7 @@
               <span class="stock-label">信号价格</span>
               <span class="stock-value">${signalPrice ? signalPrice.toFixed(2) : '--'}</span>
             </div>
+            <div class="stock-card-link">📊 TV图表 ›</div>
           </div>
         `;
       }).join('');
@@ -3120,7 +3171,8 @@
       }
 
       container.innerHTML = stocks.map((s, i) => {
-        return `<div style="display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--border-color);">
+        return `<div onclick="openStockInTV('${s.code}')" title="点击在 TV 图表查看"
+          style="display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--border-color); cursor: pointer;">
           <span style="font-size: 0.85em;"><b>${i + 1}.</b> ${s.code} ${s.name}</span>
           ${getIndicator(s)}
         </div>`;

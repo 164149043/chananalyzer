@@ -29,6 +29,7 @@ from ChanAnalyzer.database import get_db, KLineData
 from ChanAnalyzer.intraday_cache import (
     INTRADAY_KL_TYPES, ensure_intraday, ensure_intraday_fresh, ensure_day_fresh,
 )
+from ChanAnalyzer.okx_cache import ensure_okx, ensure_okx_fresh, OKX_MARKET
 
 router = APIRouter(prefix="/tv", tags=["tv"])
 
@@ -55,18 +56,34 @@ def _to_unix(date_str: str) -> int:
 
 # TV resolution -> KLineData.kl_type(分钟周期对应按需缓存)
 _RESOLUTION_KL = {
-    "5": "5M", "15": "15M", "30": "30M", "60": "60M",
+    "1": "1M", "5": "5M", "15": "15M", "30": "30M", "60": "60M", "240": "4H",
     "1D": "DAY", "D": "DAY", "DAY": "DAY",
     "1W": "WEEK", "W": "WEEK", "WEEK": "WEEK",
 }
 
 
 def _resolve_symbol(symbol: str):
-    """'a:000001' -> ('000001', 'a'); 兼容裸代码 '000001'"""
+    """'a:000001' -> ('000001', 'a'); 'okx:BTC-USDT' -> ('BTC-USDT', 'okx'); 兼容裸代码 '000001'"""
     parts = symbol.split(":")
     if len(parts) == 2:
         return parts[1].strip(), parts[0].strip().lower()
     return parts[0].strip(), "a"
+
+
+def _okx_inst_name(inst_id: str) -> str:
+    """'BTC-USDT' -> 'BTC'(白名单现货,展示用简名)"""
+    return inst_id.split("-")[0]
+
+
+def _okx_pricescale(last_close: Optional[float]) -> int:
+    """按价格量级动态精度(BTC 6万 vs SHIB 0.00001)"""
+    if not last_close or last_close <= 0:
+        return 100
+    if last_close >= 1:
+        return 100
+    if last_close >= 0.01:
+        return 10000
+    return 100000000
 
 
 def _get_stock_name(code: str) -> str:
@@ -99,7 +116,7 @@ def _unauthorized():
 
 # ==================== 缠论 -> TV 坐标 ====================
 
-def _build_cl_chart_data(code: str, kl_type: str) -> Optional[dict]:
+def _build_cl_chart_data(code: str, kl_type: str, market: str = "a") -> Optional[dict]:
     """
     计算缠论并转换为 TV 画图坐标数据(带缓存)。
     返回 {bis, xds, zsds, bi_zss, xd_zss, zsd_zss, bcs, mmds} 或 None。
@@ -108,26 +125,28 @@ def _build_cl_chart_data(code: str, kl_type: str) -> Optional[dict]:
     with get_db() as db:
         last = (
             db.query(KLineData.date)
-            .filter(KLineData.code == code, KLineData.kl_type == kl_type)
+            .filter(KLineData.market == market, KLineData.code == code, KLineData.kl_type == kl_type)
             .order_by(KLineData.timestamp.desc())
             .first()
         )
     if last is None:
         return None
     last_date = last[0]
-    cached = _cl_cache.get((code, kl_type))
+    cached = _cl_cache.get((market, code, kl_type))
     if cached and cached[0] == last_date:
         return cached[1]
 
-    # 计算: 周线走级联(lv_list 从大到小: [K_WEEK, K_DAY],level 0 即周线);
+    # 计算: A股周线走级联([K_WEEK,K_DAY],复权一致性);
+    # 币周线单级别(无复权,直接读OKX官方1W,不依赖日线已缓存);
     # 分钟线单级别;日线走默认
     import importlib
     ChanAnalyzer = importlib.import_module("ChanAnalyzer.analyzer").ChanAnalyzer
     from Common.CEnum import KL_TYPE
-    _KL_TYPE_ENUM = {"5M": KL_TYPE.K_5M, "15M": KL_TYPE.K_15M,
-                     "30M": KL_TYPE.K_30M, "60M": KL_TYPE.K_60M}
+    _KL_TYPE_ENUM = {"1M": KL_TYPE.K_1M, "5M": KL_TYPE.K_5M, "15M": KL_TYPE.K_15M,
+                     "30M": KL_TYPE.K_30M, "60M": KL_TYPE.K_60M, "4H": KL_TYPE.K_4H}
     if kl_type == "WEEK":
-        analyzer = ChanAnalyzer(code=code, levels=[KL_TYPE.K_WEEK, KL_TYPE.K_DAY])
+        levels = [KL_TYPE.K_WEEK] if market == OKX_MARKET else [KL_TYPE.K_WEEK, KL_TYPE.K_DAY]
+        analyzer = ChanAnalyzer(code=code, levels=levels)
         analysis = analyzer.get_analysis()
     elif kl_type in _KL_TYPE_ENUM:
         analyzer = ChanAnalyzer(code=code, levels=[_KL_TYPE_ENUM[kl_type]])
@@ -208,7 +227,7 @@ def _build_cl_chart_data(code: str, kl_type: str) -> Optional[dict]:
         "bcs": [],        # 背驰标记: CChan 不单独输出(买卖点即背驰应用)
         "mmds": mmds,
     }
-    _cl_cache[(code, kl_type)] = (last_date, data)
+    _cl_cache[(market, code, kl_type)] = (last_date, data)
     return data
 
 
@@ -221,11 +240,14 @@ async def tv_config(request: Request):
     return {
         "supports_search": True,
         "supports_group_request": False,
-        "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
+        "supported_resolutions": ["1", "5", "15", "30", "60", "240", "1D", "1W"],
         "supports_marks": False,
         "supports_timescale_marks": False,
         "supports_time": True,
-        "exchanges": [{"value": "a", "name": "沪深", "desc": "沪深A股"}],
+        "exchanges": [
+            {"value": "a", "name": "沪深", "desc": "沪深A股"},
+            {"value": "okx", "name": "OKX", "desc": "OKX加密货币(现货)"},
+        ],
     }
 
 
@@ -234,6 +256,39 @@ async def tv_symbols(request: Request, symbol: str = ""):
     if await _tv_user(request) is None:
         return _unauthorized()
     code, market = _resolve_symbol(symbol)
+    if market == OKX_MARKET:
+        # OKX 现货: 7x24,精度按价格动态
+        from ChanAnalyzer.okx_cache import _whitelist
+        if code not in _whitelist():
+            return JSONResponse({"s": "error", "errmsg": f"not in OKX whitelist: {code}"}, status_code=400)
+        last_close = None
+        with get_db() as db:
+            row = (
+                db.query(KLineData.close)
+                .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                        KLineData.kl_type == "DAY")
+                .order_by(KLineData.timestamp.desc())
+                .first()
+            )
+            last_close = row[0] if row else None
+        return {
+            "name": code,
+            "ticker": f"{market}:{code}",
+            "full_name": f"{market}:{code}",
+            "description": _okx_inst_name(code),
+            "exchange": market,
+            "type": "crypto",
+            "session": "24x7",
+            "timezone": "Asia/Shanghai",
+            "pricescale": _okx_pricescale(last_close),
+            "minmov": 1,
+            "has_intraday": True,
+            "intraday_multipliers": ["1", "5", "15", "30", "60", "240"],
+            "has_daily": True,
+            "has_weekly_and_monthly": True,
+            "supported_resolutions": ["1", "5", "15", "30", "60", "240", "1D", "1W"],
+            "visible_plots_set": "ohlcv",
+        }
     if len(code) != 6 or not code.isdigit():
         return JSONResponse({"s": "error", "errmsg": f"invalid symbol: {symbol}"}, status_code=400)
     return {
@@ -248,7 +303,7 @@ async def tv_symbols(request: Request, symbol: str = ""):
         "pricescale": 100,
         "minmov": 1,
         "has_intraday": True,
-        "intraday_multipliers": ["5", "15", "30", "60"],  # 分钟线按需缓存,首次拉取需数秒
+        "intraday_multipliers": ["5", "15", "30", "60"],  # 分钟线按需缓存,首次拉取需数秒(tdx仅此四档)
         "has_daily": True,
         "has_weekly_and_monthly": True,
         "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
@@ -294,7 +349,123 @@ async def tv_search(
                 "timezone": "Asia/Shanghai",
                 "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
             })
+        # OKX 白名单币(代码或简名前缀匹配,如输入 btc)
+        if exchange in ("a", "", "all") or exchange == "okx":
+            from ChanAnalyzer.okx_cache import _whitelist
+            for inst in sorted(_whitelist()):
+                base = inst.split("-")[0].lower()
+                if q in base or inst.lower().startswith(q):
+                    out.append({
+                        "symbol": inst,
+                        "name": inst,
+                        "full_name": f"okx:{inst}",
+                        "description": inst.split("-")[0],
+                        "exchange": "okx",
+                        "ticker": f"okx:{inst}",
+                        "type": "crypto",
+                        "session": "24x7",
+                        "timezone": "Asia/Shanghai",
+                        "supported_resolutions": ["1", "5", "15", "30", "60", "240", "1D", "1W"],
+                    })
     return out
+
+
+def _history_response(rows, cl, status: str, first_data_request: str) -> dict:
+    """/tv/history 响应组装(A股/OKX 共用): 尾部切片 + 缠论扩展字段"""
+    def _tail(seq, n):
+        return seq if first_data_request == "true" else seq[-n:]
+
+    return {
+        "s": status,
+        "t": _tail([_to_unix(r.date) for r in rows], 10),
+        "o": _tail([r.open for r in rows], 10),
+        "h": _tail([r.high for r in rows], 10),
+        "l": _tail([r.low for r in rows], 10),
+        "c": _tail([r.close for r in rows], 10),
+        "v": _tail([r.volume or 0 for r in rows], 10),
+        "fxs": _tail(cl["fxs"], 5),
+        "bis": _tail(cl["bis"], 5),
+        "xds": _tail(cl["xds"], 5),
+        "zsds": _tail(cl["zsds"], 5),
+        "bi_zss": _tail(cl["bi_zss"], 5),
+        "xd_zss": _tail(cl["xd_zss"], 5),
+        "zsd_zss": _tail(cl["zsd_zss"], 5),
+        "bcs": _tail(cl["bcs"], 5),
+        "mmds": _tail(cl["mmds"], 5),
+        "update": first_data_request != "true",  # 后续轮询数据标志
+    }
+
+
+async def _tv_history_okx(code: str, kl_type: str, to, first_data_request: str, status: str) -> dict:
+    """OKX 币的 history: market 过滤查询 + 按需缓存(首拉含load_markets可能30s+) + 7x24兜底"""
+    from starlette.concurrency import run_in_threadpool
+
+    def _query():
+        with get_db() as db:
+            return (
+                db.query(KLineData)
+                .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                        KLineData.kl_type == kl_type)
+                .order_by(KLineData.timestamp.asc())
+                .all()
+            )
+
+    rows = await run_in_threadpool(_query)
+    if not rows:
+        await run_in_threadpool(ensure_okx, code, kl_type)
+        rows = await run_in_threadpool(_query)
+    else:
+        refreshed = await run_in_threadpool(ensure_okx_fresh, code, kl_type, rows[-1].timestamp)
+        if refreshed:
+            rows = await run_in_threadpool(_query)
+    if not rows:
+        return {"s": "no_data"}
+    if to is not None and to < _to_unix(rows[0].date):
+        return {"s": "no_data"}
+
+    cl = _build_cl_chart_data(code, kl_type, market=OKX_MARKET) or {
+        "fxs": [], "bis": [], "xds": [], "zsds": [],
+        "bi_zss": [], "xd_zss": [], "zsd_zss": [], "bcs": [], "mmds": [],
+    }
+    return _history_response(rows, cl, status, first_data_request)
+
+
+@router.get("/refresh")
+async def tv_refresh(request: Request, code: str = "", resolution: str = "1D"):
+    """用户点击"刷新数据"按钮: 对币强制绕过冷却增量刷新当前周期缓存。
+
+    A股不走此端点(resetData 后 history 兜底已有盘中逻辑),无缓存币种返回提示。
+    """
+    if await _tv_user(request) is None:
+        return _unauthorized()
+    code = code.strip().upper()
+    if not code:
+        return {"ok": False, "msg": "缺少 code"}
+    kl_type = _RESOLUTION_KL.get(resolution, "DAY")
+    from starlette.concurrency import run_in_threadpool
+
+    def _do_refresh():
+        from ChanAnalyzer.okx_cache import ensure_okx, ensure_okx_fresh
+        from ChanAnalyzer.database import KLineData
+        with get_db() as db:
+            last = (
+                db.query(KLineData.timestamp)
+                .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                        KLineData.kl_type == kl_type)
+                .order_by(KLineData.timestamp.desc())
+                .first()
+            )
+        if not last or not last[0]:
+            rows = ensure_okx(code, kl_type)
+            return {"ok": rows != 0, "msg": "已按需拉取" if rows else "拉取失败或不在白名单"}
+        ensure_okx(code, kl_type)  # 顺带补全(数量不足时)
+        ensure_okx_fresh(code, kl_type, last[0], force=True)
+        return {"ok": True, "msg": "已刷新"}
+
+    try:
+        return await run_in_threadpool(_do_refresh)
+    except Exception as e:
+        return {"ok": False, "msg": f"刷新失败: {e}"}
 
 
 @router.get("/history")
@@ -309,14 +480,14 @@ async def tv_history(
     if await _tv_user(request) is None:
         return _unauthorized()
 
-    code, _market = _resolve_symbol(symbol)
+    code, market = _resolve_symbol(symbol)
     kl_type = _RESOLUTION_KL.get(resolution, "DAY")
 
     now = time_mod.time()
     status = "ok"
     if firstDataRequest == "false":
         # 限流: 5 秒内同 symbol+resolution 超过 5 次返回 no_data
-        key = f"{code}_{resolution}"
+        key = f"{market}_{code}_{resolution}"
         cnt = _history_req_counter.get(key)
         if cnt and cnt["counter"] >= 5 and now - cnt["tm"] <= 5:
             _history_req_counter[key] = {"counter": 0, "tm": now}
@@ -326,11 +497,14 @@ async def tv_history(
         else:
             _history_req_counter[key] = {"counter": 0, "tm": now}
 
+    if market == OKX_MARKET:
+        return await _tv_history_okx(code, kl_type, to, firstDataRequest, status)
+
     # K线(从 KLineData 读,不经过引擎内部K线,保证完整 OHLCV)
     with get_db() as db:
         rows = (
             db.query(KLineData)
-            .filter(KLineData.code == code, KLineData.kl_type == kl_type)
+            .filter(KLineData.market == "a", KLineData.code == code, KLineData.kl_type == kl_type)
             .order_by(KLineData.timestamp.asc())
             .all()
         )
@@ -381,29 +555,7 @@ async def tv_history(
         "fxs": [], "bis": [], "xds": [], "zsds": [],
         "bi_zss": [], "xd_zss": [], "zsd_zss": [], "bcs": [], "mmds": [],
     }
-
-    def _tail(seq, n):
-        return seq if firstDataRequest == "true" else seq[-n:]
-
-    return {
-        "s": status,
-        "t": _tail([_to_unix(r.date) for r in rows], 10),
-        "o": _tail([r.open for r in rows], 10),
-        "h": _tail([r.high for r in rows], 10),
-        "l": _tail([r.low for r in rows], 10),
-        "c": _tail([r.close for r in rows], 10),
-        "v": _tail([r.volume or 0 for r in rows], 10),
-        "fxs": _tail(cl["fxs"], 5),
-        "bis": _tail(cl["bis"], 5),
-        "xds": _tail(cl["xds"], 5),
-        "zsds": _tail(cl["zsds"], 5),
-        "bi_zss": _tail(cl["bi_zss"], 5),
-        "xd_zss": _tail(cl["xd_zss"], 5),
-        "zsd_zss": _tail(cl["zsd_zss"], 5),
-        "bcs": _tail(cl["bcs"], 5),
-        "mmds": _tail(cl["mmds"], 5),
-        "update": firstDataRequest != "true",  # 后续轮询数据标志
-    }
+    return _history_response(rows, cl, status, firstDataRequest)
 
 
 @router.get("/time")

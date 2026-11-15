@@ -201,8 +201,9 @@
     this._drawRetryCount = 0;
   }
 
-  ChartManager.prototype.init = function (code) {
+  ChartManager.prototype.init = function (code, market) {
     this.currentCode = code;
+    this.currentMarket = market || "a";
     var interval = localStorage.getItem(LS_KEY_INTERVAL) || "1D";
     var theme = localStorage.getItem(LS_KEY_THEME) || "dark";
 
@@ -213,7 +214,7 @@
       fullscreen: false,
       // 此库版本用 container(选择器字符串); container_id 为新版 API,此版本不识别
       container: this.id,
-      symbol: "a:" + code,
+      symbol: this.currentMarket + ":" + code,
       interval: interval,
       datafeed: this.udf_datafeed,
       library_path: "/static/charting_library/",
@@ -475,12 +476,13 @@
     });
   };
 
-  ChartManager.prototype.setSymbol = function (code) {
+  ChartManager.prototype.setSymbol = function (code, market) {
     this.currentCode = code;
+    this.currentMarket = market || "a";
     this.resetDrawRetry();
     this.clear_draw_chanlun();
     if (this.widget) {
-      this.widget.setSymbol("a:" + code, localStorage.getItem(LS_KEY_INTERVAL) || "1D");
+      this.widget.setSymbol(this.currentMarket + ":" + code, localStorage.getItem(LS_KEY_INTERVAL) || "1D");
     }
   };
 
@@ -500,17 +502,19 @@
 
   /**
    * 打开 TV 图表(懒加载资产; 已打开则切换标的)
-   * @param code 股票代码,如 '000001'
+   * @param code 股票代码,如 '000001';币如 'BTC-USDT'
+   * @param market 'a'(默认) / 'okx'
    */
-  function open(code) {
+  function open(code, market) {
+    market = market || "a";
     var el = document.getElementById("tv_chart_container");
     if (!el) return;
     if (!window.Datafeeds || !window.TradingView) {
       loadScript("/static/datafeeds/udf/dist/bundle.js")
         .then(function () { return loadScript("/static/charting_library/charting_library.standalone.js"); })
         .then(function () {
-          if (!manager) manager = new ChartManager("tv_chart_container").init(code);
-          else manager.setSymbol(code);
+          if (!manager) manager = new ChartManager("tv_chart_container").init(code, market);
+          else manager.setSymbol(code, market);
         })
         .catch(function (e) {
           el.innerHTML = '<div style="padding:40px;color:#e74c3c;text-align:center">图表资源加载失败: ' +
@@ -518,8 +522,8 @@
         });
       return;
     }
-    if (!manager) manager = new ChartManager("tv_chart_container").init(code);
-    else manager.setSymbol(code);
+    if (!manager) manager = new ChartManager("tv_chart_container").init(code, market);
+    else manager.setSymbol(code, market);
   }
 
   // ==================== 对外接口 ====================
@@ -530,8 +534,19 @@
     if (manager) manager.showLayoutDialog();
   }
 
-  function refresh() {
+  async function refresh() {
     if (manager && manager.widget) {
+      // 币: 先让后端绕过冷却增量刷新库缓存,再让TV重拉——否则日线/4H的
+      // 进行中bar停在旧快照,resetData 也只是重新读旧库
+      try {
+        var code = manager.currentCode;
+        var res = localStorage.getItem(LS_KEY_INTERVAL) || "1D";
+        if (code && manager.currentMarket === "okx") {
+          await fetch("/tv/refresh?code=" + encodeURIComponent(code) +
+                      "&resolution=" + encodeURIComponent(res),
+                      { credentials: "include" });
+        }
+      } catch (e) { /* 强制刷新失败仍继续重置图表 */ }
       manager.widget.resetCache();
       manager.widget.activeChart().resetData();
     }
