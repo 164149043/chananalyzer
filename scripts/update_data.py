@@ -45,6 +45,11 @@ DATE_FMT_DAY = "%Y/%m/%d %H:%M:%S"    # DAY 行 date 格式(与重播种一致,1
 DATE_FMT_WEEK = "%Y/%m/%d"            # WEEK 行 date 格式(与库内历史 WEEK 一致)
 
 
+def _is_a_stock(code: str) -> bool:
+    """A股代码=6位数字;币(如 BTC-USDT)含字母连字符,永不进 tdx 刷新链路"""
+    return code.isdigit() and len(code) == 6
+
+
 def load_progress() -> set:
     if PROGRESS_FILE.exists():
         try:
@@ -157,8 +162,10 @@ def pd_ts(dt):
 
 
 def refresh_intraday(src: TdxSource):
-    """刷新已缓存的分钟周期组合(按需缓存策略:只更库内已有的,不新增)"""
-    combos = cached_intraday_combos()
+    """刷新已缓存的分钟周期组合(按需缓存策略:只更库内已有的,不新增)
+    仅限A股(market='a'): OKX 币的分钟数据由 tv.py 的 7x24 兜底刷新维护,
+    绝不能经 tdx 协议拉币(必然失败)。"""
+    combos = [c for c in cached_intraday_combos() if _is_a_stock(c[0])]
     if not combos:
         return
     print(f"\n分钟线刷新: 库内已缓存 {len(combos)} 个 (code, 周期) 组合")
