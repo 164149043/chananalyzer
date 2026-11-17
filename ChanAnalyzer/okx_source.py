@@ -39,13 +39,34 @@ _DAY_PLUS = ("DAY", "WEEK")
 BASE = "https://www.okx.com"
 
 
-def _load_env_proxy() -> str:
+def _load_env_base() -> str:
+    """读 .env OKX_BASE_URL(默认主域名)。
+    大陆环境主域名被 DNS 污染(解析到 169.254.0.2 黑洞)时,
+    可配 OKX_BASE_URL=https://aws.okx.com (OKX 官方备用出海线路)。"""
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        for line in env_path.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if line.startswith('OKX_BASE_URL=') and len(line) > len('OKX_BASE_URL='):
+                val = line.split('=', 1)[1].strip().rstrip('/')
+                if val.startswith('http'):
+                    return val
+    return BASE
+
+
+def _load_env_proxy() -> Optional[str]:
+    """读 .env OKX_PROXY:
+    - none/direct/off (不区分大小写) -> 返回 None,直连(海外服务器)
+    - 未配置 -> 默认 Clash 7897(本机大陆环境兼容;云服务器务必显式配置)
+    - 其他值 -> 该代理地址(国内服务器自建代理)
+    """
     env_path = Path(__file__).parent.parent / '.env'
     if env_path.exists():
         for line in env_path.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if line.startswith('OKX_PROXY=') and len(line) > len('OKX_PROXY='):
-                return line.split('=', 1)[1].strip()
+                val = line.split('=', 1)[1].strip()
+                return None if val.lower() in ("none", "direct", "off") else val
     return "http://127.0.0.1:7897"  # Clash 默认混合端口
 
 
@@ -53,13 +74,15 @@ class OkxSource:
     """OKX K线源(REST 直连 + Clash 代理,带重试)"""
 
     def __init__(self, proxy: Optional[str] = None):
-        self._proxy = proxy or _load_env_proxy()
+        self._proxy = proxy if proxy is not None else _load_env_proxy()
+        self._base = _load_env_base()
         self._session: Optional[requests.Session] = None
 
     def _sess(self) -> requests.Session:
         if self._session is None:
             s = requests.Session()
-            s.proxies = {"http": self._proxy, "https": self._proxy}
+            if self._proxy:
+                s.proxies = {"http": self._proxy, "https": self._proxy}
             s.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) chananalyzer"
             self._session = s
         return self._session
@@ -77,7 +100,7 @@ class OkxSource:
         last_msg = ""
         for i in range(retries):
             try:
-                r = self._sess().get(BASE + path, params=params, timeout=20)
+                r = self._sess().get(self._base + path, params=params, timeout=20)
                 if r.status_code == 200:
                     data = r.json()
                     if data.get("code") == "0":
