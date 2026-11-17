@@ -29,7 +29,7 @@ from ChanAnalyzer.database import get_db, KLineData
 from ChanAnalyzer.intraday_cache import (
     INTRADAY_KL_TYPES, ensure_intraday, ensure_intraday_fresh, ensure_day_fresh,
 )
-from ChanAnalyzer.okx_cache import ensure_okx, ensure_okx_fresh, OKX_MARKET
+from ChanAnalyzer.binance_cache import ensure_binance, ensure_binance_fresh, BINANCE_MARKET
 
 router = APIRouter(prefix="/tv", tags=["tv"])
 
@@ -63,19 +63,23 @@ _RESOLUTION_KL = {
 
 
 def _resolve_symbol(symbol: str):
-    """'a:000001' -> ('000001', 'a'); 'okx:BTC-USDT' -> ('BTC-USDT', 'okx'); 兼容裸代码 '000001'"""
+    """'a:000001' -> ('000001', 'a'); 'binance:BTC-USDT' -> ('BTC-USDT', 'binance');
+    兼容裸代码 '000001' 与历史 'okx:' 前缀(统一映射 crypto)"""
     parts = symbol.split(":")
     if len(parts) == 2:
-        return parts[1].strip(), parts[0].strip().lower()
+        market = parts[0].strip().lower()
+        if market == "okx":  # 历史前缀(旧书签/旧布局)兼容
+            market = "binance"
+        return parts[1].strip(), market
     return parts[0].strip(), "a"
 
 
-def _okx_inst_name(inst_id: str) -> str:
+def _binance_inst_name(inst_id: str) -> str:
     """'BTC-USDT' -> 'BTC'(白名单现货,展示用简名)"""
     return inst_id.split("-")[0]
 
 
-def _okx_pricescale(last_close: Optional[float]) -> int:
+def _binance_pricescale(last_close: Optional[float]) -> int:
     """按价格量级动态精度(BTC 6万 vs SHIB 0.00001)"""
     if not last_close or last_close <= 0:
         return 100
@@ -114,6 +118,18 @@ def _unauthorized():
     return JSONResponse({"s": "error", "errmsg": "unauthorized"}, status_code=401)
 
 
+def _crypto_allowed(user_id) -> bool:
+    """ENABLE_CRYPTO 总开关(tv通道): =1 全员;未配置/其他值仅 admin。
+    查库取 role(JWT role 不可信)。"""
+    if user_id is None:
+        return False
+    from ChanAnalyzer.binance_cache import crypto_enabled_for_role
+    from web.auth import get_user_by_id
+    with get_db() as db:
+        user = get_user_by_id(db, user_id)
+    return crypto_enabled_for_role(user.role if user else "user")
+
+
 # ==================== 缠论 -> TV 坐标 ====================
 
 def _build_cl_chart_data(code: str, kl_type: str, market: str = "a") -> Optional[dict]:
@@ -145,7 +161,7 @@ def _build_cl_chart_data(code: str, kl_type: str, market: str = "a") -> Optional
     _KL_TYPE_ENUM = {"1M": KL_TYPE.K_1M, "5M": KL_TYPE.K_5M, "15M": KL_TYPE.K_15M,
                      "30M": KL_TYPE.K_30M, "60M": KL_TYPE.K_60M, "4H": KL_TYPE.K_4H}
     if kl_type == "WEEK":
-        levels = [KL_TYPE.K_WEEK] if market == OKX_MARKET else [KL_TYPE.K_WEEK, KL_TYPE.K_DAY]
+        levels = [KL_TYPE.K_WEEK] if market == BINANCE_MARKET else [KL_TYPE.K_WEEK, KL_TYPE.K_DAY]
         analyzer = ChanAnalyzer(code=code, levels=levels)
         analysis = analyzer.get_analysis()
     elif kl_type in _KL_TYPE_ENUM:
@@ -235,8 +251,15 @@ def _build_cl_chart_data(code: str, kl_type: str, market: str = "a") -> Optional
 
 @router.get("/config")
 async def tv_config(request: Request):
-    if await _tv_user(request) is None:
+    uid = await _tv_user(request)
+    if uid is None:
         return _unauthorized()
+    exchanges = [{"value": "a", "name": "沪深", "desc": "沪深A股"}]
+    if _crypto_allowed(uid):
+        # 显示名跟随实际数据源(CRYPTO_SOURCE);value 为中性市场键 'crypto'
+        from ChanAnalyzer.binance_cache import crypto_source_label
+        label = crypto_source_label()
+        exchanges.append({"value": "binance", "name": label, "desc": f"{label}数字货币(现货)"})
     return {
         "supports_search": True,
         "supports_group_request": False,
@@ -244,28 +267,28 @@ async def tv_config(request: Request):
         "supports_marks": False,
         "supports_timescale_marks": False,
         "supports_time": True,
-        "exchanges": [
-            {"value": "a", "name": "沪深", "desc": "沪深A股"},
-            {"value": "okx", "name": "OKX", "desc": "OKX加密货币(现货)"},
-        ],
+        "exchanges": exchanges,
     }
 
 
 @router.get("/symbols")
 async def tv_symbols(request: Request, symbol: str = ""):
-    if await _tv_user(request) is None:
+    uid = await _tv_user(request)
+    if uid is None:
         return _unauthorized()
     code, market = _resolve_symbol(symbol)
-    if market == OKX_MARKET:
+    if market == BINANCE_MARKET:
+        if not _crypto_allowed(uid):
+            return JSONResponse({"s": "error", "errmsg": "crypto disabled"}, status_code=403)
         # OKX 现货: 7x24,精度按价格动态
-        from ChanAnalyzer.okx_cache import _whitelist
+        from ChanAnalyzer.binance_cache import _whitelist
         if code not in _whitelist():
-            return JSONResponse({"s": "error", "errmsg": f"not in OKX whitelist: {code}"}, status_code=400)
+            return JSONResponse({"s": "error", "errmsg": f"not in crypto whitelist: {code}"}, status_code=400)
         last_close = None
         with get_db() as db:
             row = (
                 db.query(KLineData.close)
-                .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                .filter(KLineData.market == BINANCE_MARKET, KLineData.code == code,
                         KLineData.kl_type == "DAY")
                 .order_by(KLineData.timestamp.desc())
                 .first()
@@ -275,12 +298,12 @@ async def tv_symbols(request: Request, symbol: str = ""):
             "name": code,
             "ticker": f"{market}:{code}",
             "full_name": f"{market}:{code}",
-            "description": _okx_inst_name(code),
+            "description": _binance_inst_name(code),
             "exchange": market,
             "type": "crypto",
             "session": "24x7",
             "timezone": "Asia/Shanghai",
-            "pricescale": _okx_pricescale(last_close),
+            "pricescale": _binance_pricescale(last_close),
             "minmov": 1,
             "has_intraday": True,
             "intraday_multipliers": ["1", "5", "15", "30", "60", "240"],
@@ -319,7 +342,8 @@ async def tv_search(
     exchange: str = "a",
     limit: int = 30,
 ):
-    if await _tv_user(request) is None:
+    uid = await _tv_user(request)
+    if uid is None:
         return _unauthorized()
     q = query.strip().lower()
     out = []
@@ -349,19 +373,19 @@ async def tv_search(
                 "timezone": "Asia/Shanghai",
                 "supported_resolutions": ["5", "15", "30", "60", "1D", "1W"],
             })
-        # OKX 白名单币(代码或简名前缀匹配,如输入 btc)
-        if exchange in ("a", "", "all") or exchange == "okx":
-            from ChanAnalyzer.okx_cache import _whitelist
+        # 白名单币(代码或简名前缀匹配,如输入 btc);受 ENABLE_CRYPTO 开关控制
+        if _crypto_allowed(uid) and (exchange in ("a", "", "all") or exchange in ("binance", "okx")):
+            from ChanAnalyzer.binance_cache import _whitelist
             for inst in sorted(_whitelist()):
                 base = inst.split("-")[0].lower()
                 if q in base or inst.lower().startswith(q):
                     out.append({
                         "symbol": inst,
                         "name": inst,
-                        "full_name": f"okx:{inst}",
+                        "full_name": f"binance:{inst}",
                         "description": inst.split("-")[0],
-                        "exchange": "okx",
-                        "ticker": f"okx:{inst}",
+                        "exchange": "binance",
+                        "ticker": f"binance:{inst}",
                         "type": "crypto",
                         "session": "24x7",
                         "timezone": "Asia/Shanghai",
@@ -404,7 +428,7 @@ async def _tv_history_okx(code: str, kl_type: str, to, first_data_request: str, 
         with get_db() as db:
             return (
                 db.query(KLineData)
-                .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                .filter(KLineData.market == BINANCE_MARKET, KLineData.code == code,
                         KLineData.kl_type == kl_type)
                 .order_by(KLineData.timestamp.asc())
                 .all()
@@ -412,10 +436,10 @@ async def _tv_history_okx(code: str, kl_type: str, to, first_data_request: str, 
 
     rows = await run_in_threadpool(_query)
     if not rows:
-        await run_in_threadpool(ensure_okx, code, kl_type)
+        await run_in_threadpool(ensure_binance, code, kl_type)
         rows = await run_in_threadpool(_query)
     else:
-        refreshed = await run_in_threadpool(ensure_okx_fresh, code, kl_type, rows[-1].timestamp)
+        refreshed = await run_in_threadpool(ensure_binance_fresh, code, kl_type, rows[-1].timestamp)
         if refreshed:
             rows = await run_in_threadpool(_query)
     if not rows:
@@ -423,7 +447,7 @@ async def _tv_history_okx(code: str, kl_type: str, to, first_data_request: str, 
     if to is not None and to < _to_unix(rows[0].date):
         return {"s": "no_data"}
 
-    cl = _build_cl_chart_data(code, kl_type, market=OKX_MARKET) or {
+    cl = _build_cl_chart_data(code, kl_type, market=BINANCE_MARKET) or {
         "fxs": [], "bis": [], "xds": [], "zsds": [],
         "bi_zss": [], "xd_zss": [], "zsd_zss": [], "bcs": [], "mmds": [],
     }
@@ -436,8 +460,11 @@ async def tv_refresh(request: Request, code: str = "", resolution: str = "1D"):
 
     A股不走此端点(resetData 后 history 兜底已有盘中逻辑),无缓存币种返回提示。
     """
-    if await _tv_user(request) is None:
+    uid = await _tv_user(request)
+    if uid is None:
         return _unauthorized()
+    if not _crypto_allowed(uid):
+        return {"ok": False, "msg": "加密货币功能未开放"}
     code = code.strip().upper()
     if not code:
         return {"ok": False, "msg": "缺少 code"}
@@ -445,21 +472,21 @@ async def tv_refresh(request: Request, code: str = "", resolution: str = "1D"):
     from starlette.concurrency import run_in_threadpool
 
     def _do_refresh():
-        from ChanAnalyzer.okx_cache import ensure_okx, ensure_okx_fresh
+        from ChanAnalyzer.binance_cache import ensure_binance, ensure_binance_fresh
         from ChanAnalyzer.database import KLineData
         with get_db() as db:
             last = (
                 db.query(KLineData.timestamp)
-                .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                .filter(KLineData.market == BINANCE_MARKET, KLineData.code == code,
                         KLineData.kl_type == kl_type)
                 .order_by(KLineData.timestamp.desc())
                 .first()
             )
         if not last or not last[0]:
-            rows = ensure_okx(code, kl_type)
+            rows = ensure_binance(code, kl_type)
             return {"ok": rows != 0, "msg": "已按需拉取" if rows else "拉取失败或不在白名单"}
-        ensure_okx(code, kl_type)  # 顺带补全(数量不足时)
-        ensure_okx_fresh(code, kl_type, last[0], force=True)
+        ensure_binance(code, kl_type)  # 顺带补全(数量不足时)
+        ensure_binance_fresh(code, kl_type, last[0], force=True)
         return {"ok": True, "msg": "已刷新"}
 
     try:
@@ -477,11 +504,14 @@ async def tv_history(
     to: Optional[int] = None,
     firstDataRequest: str = "false",
 ):
-    if await _tv_user(request) is None:
+    uid = await _tv_user(request)
+    if uid is None:
         return _unauthorized()
 
     code, market = _resolve_symbol(symbol)
     kl_type = _RESOLUTION_KL.get(resolution, "DAY")
+    if market == BINANCE_MARKET and not _crypto_allowed(uid):
+        return JSONResponse({"s": "error", "errmsg": "crypto disabled"}, status_code=403)
 
     now = time_mod.time()
     status = "ok"
@@ -497,7 +527,7 @@ async def tv_history(
         else:
             _history_req_counter[key] = {"counter": 0, "tm": now}
 
-    if market == OKX_MARKET:
+    if market == BINANCE_MARKET:
         return await _tv_history_okx(code, kl_type, to, firstDataRequest, status)
 
     # K线(从 KLineData 读,不经过引擎内部K线,保证完整 OHLCV)

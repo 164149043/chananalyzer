@@ -1600,12 +1600,19 @@ async def resolve_stock(q: str = "", user_id: int = Depends(get_current_user)):
     resolved_code, resolved_name, success = resolve_stock_code(q)
     if success:
         return {"code": resolved_code, "name": resolved_name, "market": "a"}
-    # OKX 币: 精确 instId 或 base 简名匹配(如 btc -> BTC-USDT)
-    from ChanAnalyzer.okx_cache import _whitelist
+    # OKX 币: 精确 instId 或 base 简名匹配(如 btc -> BTC-USDT);受 ENABLE_CRYPTO 开关控制
+    from ChanAnalyzer.binance_cache import _whitelist, crypto_enabled_for_role
+    with get_db() as db:
+        user = get_user_by_id(db, user_id)
+    if not crypto_enabled_for_role(user.role if user else "user"):
+        return {"error": f"未找到股票: {q}"}
+    uq = q.strip().upper()
     uq = q.strip().upper()
     for inst in sorted(_whitelist()):
         if uq == inst or uq == inst.split("-")[0]:
-            return {"code": inst, "name": inst.split("-")[0], "market": "okx"}
+            from ChanAnalyzer.binance_cache import crypto_source_label
+            return {"code": inst, "name": inst.split("-")[0], "market": "binance",
+                    "source": crypto_source_label()}
     return {"error": f"未找到股票: {q}"}
 
 
@@ -1745,53 +1752,66 @@ async def stream_analyze_stock(code: str, temperatures: Dict[str, float] = None,
     tasks: List[asyncio.Task] = []
 
     try:
-        # 0. 解析股票代码/名称(A股优先;未命中匹配 OKX 白名单币)
+        # 0. 解析股票代码/名称(A股优先;未命中匹配 OKX 白名单币,受 ENABLE_CRYPTO 开关控制)
         market = "a"
         resolved_code, resolved_name, success = resolve_stock_code(code)
         if not success:
-            from ChanAnalyzer.okx_cache import _whitelist, ensure_okx
+            from ChanAnalyzer.binance_cache import _whitelist, ensure_binance, crypto_enabled_for_role
+            crypto_ok = False
+            if user_id is not None:
+                with get_db() as db:
+                    user = get_user_by_id(db, user_id)
+                crypto_ok = crypto_enabled_for_role(user.role if user else "user")
+            if not crypto_ok:
+                yield f"data: {json.dumps({'event': 'error', 'message': '加密货币功能未开放'})}\n\n"
+                yield f"data: {json.dumps({'event': 'complete', 'status': 'error'})}\n\n"
+                return
             uq = code.strip().upper()
             okx_code = next((inst for inst in sorted(_whitelist())
                              if uq == inst or uq == inst.split("-")[0]), None)
             if okx_code is None:
                 yield f"data: {json.dumps({'event': 'error', 'message': f'未找到股票: {code}'})}\n\n"
                 return
-            market, code, resolved_name = "okx", okx_code, okx_code.split("-")[0]
+            market, code, resolved_name = "binance", okx_code, okx_code.split("-")[0]
 
         code = resolved_code if market == "a" else code
         stock_display_name = f"{resolved_name} ({code})" if resolved_name else code
 
         # 周期: 仅币生效(白名单校验,非法回退日线);A股固定日线
         kl_period = "DAY"
-        if market == "okx":
+        if market == "binance":
             req_period = (period or "DAY").strip().upper()
             kl_period = req_period if req_period in _okx_period_enum_map() else "DAY"
 
-        yield f"data: {json.dumps({'event': 'meta', 'market': market, 'code': code,
-                                   'name': resolved_name or code, 'period': kl_period,
-                                   'period_cn': _PERIOD_CN[kl_period]})}\n\n"
+        meta_payload = {'event': 'meta', 'market': market, 'code': code,
+                        'name': resolved_name or code, 'period': kl_period,
+                        'period_cn': _PERIOD_CN[kl_period]}
+        if market == "binance":
+            from ChanAnalyzer.binance_cache import crypto_source_label
+            meta_payload['source'] = crypto_source_label()
+        yield f"data: {json.dumps(meta_payload)}\n\n"
 
-        # 1. 获取缠论分析数据(币: 按所选周期按需拉取+新鲜度兜底——只调 ensure_okx
+        # 1. 获取缠论分析数据(币: 按所选周期按需拉取+新鲜度兜底——只调 ensure_binance
         #    的话已有缓存永不刷新,AI 会基于旧数据分析;首拉/增量都是网络IO,放线程池)
-        if market == "okx":
+        if market == "binance":
             from starlette.concurrency import run_in_threadpool
             from ChanAnalyzer.database import KLineData
-            from ChanAnalyzer.okx_cache import OKX_MARKET, ensure_okx_fresh
+            from ChanAnalyzer.binance_cache import BINANCE_MARKET, ensure_binance_fresh
 
-            def _ensure_okx_period():
-                ensure_okx(code, kl_period)
+            def _ensure_binance_period():
+                ensure_binance(code, kl_period)
                 with get_db() as db:
                     last = (
                         db.query(KLineData.timestamp)
-                        .filter(KLineData.market == OKX_MARKET, KLineData.code == code,
+                        .filter(KLineData.market == BINANCE_MARKET, KLineData.code == code,
                                 KLineData.kl_type == kl_period)
                         .order_by(KLineData.timestamp.desc())
                         .first()
                     )
                 if last and last[0]:
-                    ensure_okx_fresh(code, kl_period, last[0])
+                    ensure_binance_fresh(code, kl_period, last[0])
 
-            await run_in_threadpool(_ensure_okx_period)
+            await run_in_threadpool(_ensure_binance_period)
         ChanAnalyzer = import_chan_analyzer()
         analyzer = ChanAnalyzer(code=code, levels=[_okx_period_enum_map()[kl_period]])
         analysis = analyzer.get_analysis()

@@ -163,7 +163,7 @@ def pd_ts(dt):
 
 def refresh_intraday(src: TdxSource):
     """刷新已缓存的分钟周期组合(按需缓存策略:只更库内已有的,不新增)
-    仅限A股(market='a'): OKX 币的分钟数据由 tv.py 的 7x24 兜底刷新维护,
+    仅限A股(market='a'): 币(binance)的分钟数据由 tv.py 的 7x24 兜底刷新维护,
     绝不能经 tdx 协议拉币(必然失败)。"""
     combos = [c for c in cached_intraday_combos() if _is_a_stock(c[0])]
     if not combos:
