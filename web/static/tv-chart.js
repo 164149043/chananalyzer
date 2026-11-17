@@ -503,7 +503,7 @@
   /**
    * 打开 TV 图表(懒加载资产; 已打开则切换标的)
    * @param code 股票代码,如 '000001';币如 'BTC-USDT'
-   * @param market 'a'(默认) / 'okx'
+   * @param market 'a'(默认) / 'binance'
    */
   function open(code, market) {
     market = market || "a";
@@ -541,7 +541,7 @@
       try {
         var code = manager.currentCode;
         var res = localStorage.getItem(LS_KEY_INTERVAL) || "1D";
-        if (code && manager.currentMarket === "okx") {
+        if (code && manager.currentMarket === "binance") {
           await fetch("/tv/refresh?code=" + encodeURIComponent(code) +
                       "&resolution=" + encodeURIComponent(res),
                       { credentials: "include" });

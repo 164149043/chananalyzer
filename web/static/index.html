@@ -552,6 +552,72 @@
       color: var(--text-tertiary);
     }
 
+    /* === AI 输出 Markdown 渲染样式(analyst-output/decisionOutput 容器内) === */
+    .analyst-output .md-h {
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 12px 0 6px;
+    }
+    .analyst-output .md-h1 { font-size: 1.15rem; }
+    .analyst-output .md-h2 { font-size: 1.05rem; }
+    .analyst-output .md-h3,
+    .analyst-output .md-h4 { font-size: 0.95rem; }
+    .analyst-output .md-p { margin: 4px 0; }
+    .analyst-output .md-hr {
+      border: none;
+      border-top: 1px solid var(--border-color);
+      margin: 10px 0;
+    }
+    .analyst-output .md-ul,
+    .analyst-output .md-ol {
+      margin: 4px 0 8px;
+      padding-left: 22px;
+    }
+    .analyst-output .md-ul li,
+    .analyst-output .md-ol li { margin: 2px 0; }
+    .analyst-output .md-quote {
+      margin: 6px 0;
+      padding: 4px 10px;
+      border-left: 3px solid var(--zhu-red-dim);
+      color: var(--text-tertiary);
+    }
+    .analyst-output .md-table {
+      border-collapse: collapse;
+      margin: 8px 0;
+      font-size: 0.82rem;
+      white-space: normal;
+      display: block;
+      overflow-x: auto;
+      max-width: 100%;
+    }
+    .analyst-output .md-table th,
+    .analyst-output .md-table td {
+      border: 1px solid var(--border-color);
+      padding: 4px 8px;
+      text-align: left;
+    }
+    .analyst-output .md-table th {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-primary);
+    }
+    .analyst-output .md-code {
+      font-family: Consolas, monospace;
+      font-size: 0.82em;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+    .analyst-output .md-pre {
+      font-family: Consolas, monospace;
+      font-size: 0.8rem;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+      margin: 6px 0;
+    }
+    .analyst-output strong { color: var(--text-primary); }
+
     /* === 温度滑块 === */
     .temp-control {
       margin-bottom: var(--space-md);
@@ -1933,6 +1999,39 @@
         }
 
         this.initialized = true;
+        this.scheduleRefresh();
+      },
+
+      // 自动续期: token 24h 过期且此前前端从不调 refresh,页面开过一天
+      // TV 图表就静默停更(401 刷屏)、下次操作被踢登录。每 12h(半衰)静默
+      // refresh 一次,主 token 与 /tv cookie 由后端同步续期,页面长期开着不掉线。
+      scheduleRefresh() {
+        if (this._refreshTimer) clearTimeout(this._refreshTimer);
+        this._refreshTimer = setTimeout(async () => {
+          try {
+            const token = localStorage.getItem('chanalyzer_token');
+            if (!token) return;
+            const r = await fetch(`${API_BASE}/auth/refresh`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (r.ok) {
+              const d = await r.json();
+              if (d.token) {
+                localStorage.setItem('chanalyzer_token', d.token);
+                this.scheduleRefresh();  // 链式下一轮
+              }
+            } else if (r.status === 401) {
+              // token 已彻底失效(改密/版本提升),回登录页
+              this.clear();
+              window.location.href = '/?expired=1';
+            } else {
+              this.scheduleRefresh();   // 服务暂时异常,稍后重试
+            }
+          } catch {
+            this.scheduleRefresh();     // 网络抖动,稍后重试
+          }
+        }, 12 * 60 * 60 * 1000);
       },
 
       // 清除认证信息
@@ -1941,6 +2040,7 @@
         localStorage.removeItem('chanalyzer_user_id');
         this.initialized = false;
         this.initPromise = null;
+        if (this._refreshTimer) { clearTimeout(this._refreshTimer); this._refreshTimer = null; }
       },
 
       // 登出
@@ -2204,11 +2304,11 @@
           alert(info.error);
           return;
         }
-        const isCrypto = info.market === 'okx';
+        const isCrypto = info.market === 'binance';
         const card = document.getElementById('tvChartCard');
         card.style.display = 'block';
         document.getElementById('tvChartHint').textContent =
-          `${isCrypto ? 'OKX · ' + info.name + ' · 7×24' : info.name + ' · 日线/周线'} · 图上可搜索换股`;
+          `${isCrypto ? (info.source || '数字货币') + ' · ' + info.name + ' · 7×24' : info.name + ' · 日线/周线'} · 图上可搜索换股`;
         card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         // tv-chart.js 本体很小,直接加载;内部再懒加载 datafeed+charting_library
         if (!window.TVChart) {
@@ -2375,6 +2475,70 @@
       element.innerHTML = html;
     }
 
+    // Mini Markdown 渲染器——覆盖 AI 输出子集:标题/加粗/斜体/行内代码/代码块/
+    // 无序有序列表/表格/引用/分隔线。先整体转义再生成白名单标签,天然防注入。
+    function renderMarkdown(src) {
+      if (!src) return '';
+      let text = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      const inline = (s) => s
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
+        .replace(/`([^`\n]+)`/g, '<code class="md-code">$1</code>');
+
+      const lines = text.split('\n');
+      const html = [];
+      let i = 0, inCode = false, codeBuf = [];
+      while (i < lines.length) {
+        const line = lines[i];
+        if (/^```/.test(line.trim())) {
+          if (!inCode) { inCode = true; codeBuf = []; }
+          else { inCode = false; html.push('<pre class="md-pre"><code>' + codeBuf.join('\n') + '</code></pre>'); }
+          i++; continue;
+        }
+        if (inCode) { codeBuf.push(line); i++; continue; }
+        const t = line.trim();
+        if (!t) { i++; continue; }
+        let m = t.match(/^(#{1,4})\s+(.*)$/);
+        if (m) { html.push('<div class="md-h md-h' + m[1].length + '">' + inline(m[2]) + '</div>'); i++; continue; }
+        if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { html.push('<hr class="md-hr">'); i++; continue; }
+        if (/^&gt;\s?/.test(t)) { html.push('<blockquote class="md-quote">' + inline(t.replace(/^&gt;\s?/, '')) + '</blockquote>'); i++; continue; }
+        // 表格: 表头行 + 分隔行(如 |---|---| 或 :---:)
+        if (t.includes('|') && i + 1 < lines.length &&
+            /^\|?\s*:?-{2,}[\s:|-]*\|/.test(lines[i + 1].trim())) {
+          const parseRow = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map(c => inline(c.trim()));
+          const headers = parseRow(t);
+          i += 2;
+          const rows = [];
+          while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+            rows.push(parseRow(lines[i])); i++;
+          }
+          html.push('<table class="md-table"><thead><tr>' +
+            headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
+            rows.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('') +
+            '</tbody></table>');
+          continue;
+        }
+        if (/^[-*]\s+/.test(t)) {
+          const items = [];
+          while (i < lines.length && /^\s*[-*]\s+/.test(lines[i].trim())) {
+            items.push('<li>' + inline(lines[i].trim().replace(/^[-*]\s+/, '')) + '</li>'); i++;
+          }
+          html.push('<ul class="md-ul">' + items.join('') + '</ul>'); continue;
+        }
+        if (/^\d+[.、)]\s+/.test(t)) {
+          const items = [];
+          while (i < lines.length && /^\s*\d+[.、)]\s+/.test(lines[i].trim())) {
+            items.push('<li>' + inline(lines[i].trim().replace(/^\d+[.、)]\s+/, '')) + '</li>'); i++;
+          }
+          html.push('<ol class="md-ol">' + items.join('') + '</ol>'); continue;
+        }
+        html.push('<p class="md-p">' + inline(t) + '</p>');
+        i++;
+      }
+      return html.join('\n');
+    }
+
     // 存储打字机定时器，用于中断
     const typeWriterTimers = {
       analystA: null,
@@ -2474,7 +2638,7 @@
             const tip = document.getElementById('analyzeTip')?.querySelector('.tip-text');
             if (tip) {
               tip.textContent = `分析进行中 · ${data.name || data.code} · ${data.period_cn || data.period}` +
-                (data.market === 'a' ? '（A股暂仅日线）' : '（OKX）') + '...';
+                (data.market === 'a' ? '（A股暂仅日线）' : `（${data.source || '数字货币'}）`) + '...';
             }
           }
           break;
@@ -2509,7 +2673,8 @@
             : document.getElementById('analystBStatus');
 
           if (outputEl) {
-            // 流式已完成，应用高亮并标记
+            // 流式已完成，渲染 Markdown(标题/表格/加粗)后应用高亮
+            outputEl.innerHTML = renderMarkdown(outputEl.textContent);
             highlightText(outputEl);
             outputEl.dataset.received = 'true';
           }
@@ -2534,6 +2699,7 @@
         case 'decision_done':
           const decisionOutput = document.getElementById('decisionOutput');
           if (decisionOutput) {
+            decisionOutput.innerHTML = renderMarkdown(decisionOutput.textContent);
             highlightText(decisionOutput);
             decisionOutput.dataset.received = 'true';
           }
