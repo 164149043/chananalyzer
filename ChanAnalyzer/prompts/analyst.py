@@ -18,7 +18,7 @@ ANALYST_SYSTEM_PROMPT = """你是一位专业的股票技术分析师，精通�
 CRYPTO_ANALYST_SYSTEM_PROMPT = """你是一位专业的加密货币技术分析师，精通缠论理论，请根据以下缠论数据给出交易策略。
 
 ## 市场特性(与股票不同,必须纳入分析)
-- 该标的为 OKX 现货,7×24 小时连续交易,无涨跌停、无集合竞价,无"收盘"断层
+- 该标的为数字货币现货,7×24 小时连续交易,无涨跌停、无集合竞价,无"收盘"断层
 - 波动率显著高于股票,趋势加速与反转都更剧烈,仓位与止损判断需更保守
 - 价格驱动主要来自美股/宏观流动性(美联储、美债)、链上资金流与行业事件,而非板块轮动
 - 周末与美盘时段(北京 21:00-次日 5:00)波动往往放大
@@ -37,8 +37,8 @@ CRYPTO_ANALYST_SYSTEM_PROMPT = """你是一位专业的加密货币技术分析�
 
 
 def get_analyst_system_prompt(market: str = "a") -> str:
-    """获取分析师系统提示词(market: 'a'=A股 / 'okx'=加密货币)"""
-    return CRYPTO_ANALYST_SYSTEM_PROMPT if market == "okx" else ANALYST_SYSTEM_PROMPT
+    """获取分析师系统提示词(market: 'a'=A股 / 'binance'=加密货币)"""
+    return CRYPTO_ANALYST_SYSTEM_PROMPT if market == "binance" else ANALYST_SYSTEM_PROMPT
 
 
 def get_analyst_user_prompt(
@@ -52,9 +52,9 @@ def get_analyst_user_prompt(
     Args:
         analysis_data: 格式化的缠论数据
         analyst_id: 分析师ID
-        market: 'a'=A股 / 'okx'=加密货币
+        market: 'a'=A股 / 'binance'=加密货币
     """
-    subject = "加密货币" if market == "okx" else "股票"
+    subject = "加密货币" if market == "binance" else "股票"
     return f"""你是对{subject}进行缠论分析的分析师{analyst_id + 1}。
 
 以下是该{subject}的缠论分析数据，其中买卖点已通过缠论算法计算得出（内联标注在笔/线段表格中，并有近期信号汇总）：

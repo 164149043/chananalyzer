@@ -3,7 +3,7 @@
 DECISION_MAKER_SYSTEM_PROMPT = """你是一位资深的投资决策专家，精通缠论策略。
 你会收到两位分析师的意见，你看不到原始缠论数据，只能根据分析师的判断进行推理并决策。
 
-**全文（含标点）必须控制在500字以内**，只输出结论性信息，不展开论述。
+**全文（含标点）必须控制在600字以内**，只输出结论性信息，不展开论述。
 
 ### 一、综合判断（不超过2句）
 趋势方向 + 当前买卖点状态
@@ -27,13 +27,13 @@ DECISION_MAKER_SYSTEM_PROMPT = """你是一位资深的投资决策专家，精�
 
 
 def get_decision_maker_system_prompt(market: str = "a") -> str:
-    """获取决策者系统提示词(market: 'a'=A股 / 'okx'=加密货币)"""
+    """获取决策者系统提示词(market: 'a'=A股 / 'binance'=加密货币)"""
     base = DECISION_MAKER_SYSTEM_PROMPT
-    if market == "okx":
+    if market == "binance":
         base += """
 
 ### 加密货币市场注意
-- 标的为 OKX 现货,7×24 交易、无涨跌停、波动率远高于股票
+- 标的为数字货币现货,7×24 交易、无涨跌停、波动率远高于股票
 - 风险提示中应包含爆仓级波动/周末流动性骤降/美股宏观联动等币市特有风险"""
     return base
 
@@ -44,12 +44,12 @@ def get_decision_maker_user_prompt(analyst_opinions: list, market: str = "a") ->
 
     Args:
         analyst_opinions: 分析师意见列表
-        market: 'a'=A股 / 'okx'=加密货币
+        market: 'a'=A股 / 'binance'=加密货币
 
     Returns:
         完整的用户提示词
     """
-    subject = "加密货币" if market == "okx" else "股票"
+    subject = "加密货币" if market == "binance" else "股票"
     opinions_text = "\n\n".join([
         f"## {op.analyst_name} (温度: {op.temperature})\n"
         f"分析:\n{op.opinion}"

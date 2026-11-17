@@ -129,7 +129,7 @@ class KLineData(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # 股票信息
-    market = Column(String(8), nullable=False, default='a')  # 市场: 'a'=A股 / 'okx'=OKX加密货币
+    market = Column(String(8), nullable=False, default='a')  # 市场: 'a'=A股 / 'binance'=加密货币
     code = Column(String(10), nullable=False, index=True)  # 股票代码，如 000001；币如 BTC-USDT
     kl_type = Column(String(10), nullable=False, index=True)  # 周期类型: DAY, WEEK, MON 等
 

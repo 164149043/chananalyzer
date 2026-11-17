@@ -32,7 +32,7 @@ analysts:
   #                         Qwen/Qwen2.5-72B-Instruct
   #                         Pro/Qwen/Qwen2.5-72B-Instruct
   models:
-    - Pro/deepseek-ai/DeepSeek-V3.2   # 分析师A 模型
+    - deepseek-ai/DeepSeek-V4-Flash   # 分析师A 模型
     - deepseek-ai/DeepSeek-V4.1-Flash    # 分析师B 模型
 
   # 各分析师温度（不同温度获得多样化观点）
@@ -49,14 +49,13 @@ decision_maker:
   # DeepSeek:          deepseek-reasoner
   # 硅基流动:           deepseek-ai/DeepSeek-R1
   #                    Pro/Qwen/Qwen2.5-72B-Instruct
-  model: stepfun-ai/Step-3.5-Flash
+  model: deepseek-ai/DeepSeek-V4-Pro   # 原 stepfun-ai/Step-3.5-Flash 已被硅基流动下架(403 code 30003)
 
   # 温度参数
   temperature: 0.3
 
-  # 最大输出token数(注意:决策者是推理模型 Step-3.5-Flash,
-  # 思维链优先消耗额度——实测完全分类范式推理约3000+token,
-  # 1500会被推理吃光导致正文为空,必须给足)
+  # 最大输出token数(若换回推理模型(如R1/Step系列),思维链优先消耗额度,
+  # 必须给足——实测完全分类范式推理约3000+token,1500会被推理吃光导致正文为空)
   max_tokens: 8000
 
 # ================================
