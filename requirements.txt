@@ -1,50 +1,39 @@
 # 缠论分析系统 - Python 依赖
+# 安装: pip install -r requirements.txt
+# 注: 通达信协议库 pytdx 内置于 vendor/pytdx,无需 pip 安装;
+#     TV 图表库 charting_library 需手动放置到 web/static/(不随仓库分发)
 
-# Web 框架
+# ===== Web 框架 =====
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 
-# 数据库
+# ===== 数据库 =====
 sqlalchemy>=2.0.0
-alembic>=1.12.0
 
-# 数据验证
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-
-# 数据源 (现有)
-tushare>=1.2.60
-akshare>=1.11.0
+# ===== 数据处理 =====
 pandas>=2.0.0,<3.0.0  # pandas 3.0+ 移除了 fillna(method=...) 参数，tushare 暂未适配
 numpy>=1.24.0
 
-# 任务队列 (可选)
-celery>=5.3.0
-redis>=5.0.0
+# ===== 数据源 =====
+tushare>=1.2.60        # 股票信息/资金流向/热门榜单(A股K线走通达信,见 vendor/pytdx)
+requests>=2.31.0       # Binance镜像/OKX REST直连(数字货币K线)
 
-# HTTP 客户端
-httpx>=0.25.0
-requests>=2.31.0
-
-# AI API 客户端（兼容 OpenAI 格式的 API）
+# ===== AI 分析(OpenAI 兼容 API) =====
 openai>=1.0.0
-pyyaml>=6.0.0  # YAML配置文件解析
+pyyaml>=6.0.0          # ai_config.yaml 解析
 
-# 环境变量
+# ===== 环境变量 =====
 python-dotenv>=1.0.0
 
-# 用户认证（注册登录、图形验证码）
+# ===== 用户认证(注册登录、JWT、图形验证码) =====
 bcrypt>=4.1.0
 PyJWT>=2.8.0
 Pillow>=10.0.0
 
-# 开发工具
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-black>=23.11.0
-tqdm>=4.65.0  # 进度条
+# ===== 可选: 原项目 GUI/画图模块(Plot/、App/,Web 版不依赖) =====
+# matplotlib>=3.7.0
+# PyQt6>=6.6.0
 
-# GUI 可视化
-matplotlib>=3.7.0
-PyQt6>=6.6.0
+# ===== 可选: 旧批量缓存脚本进度条(cache_all_stocks.py,缺省自动降级) =====
+# tqdm>=4.65.0
