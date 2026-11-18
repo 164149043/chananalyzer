@@ -13,6 +13,19 @@ LOG_FILE="$PROJECT_DIR/logs/auto_update.log"
 # 创建日志目录
 mkdir -p "$PROJECT_DIR/logs"
 
+# 周末跳过(A股休市;计划任务设"每天"时防周末白跑约半小时全量重算。
+# 法定节假日会白跑一次但幂等无害,不引入日历依赖)
+DOW=$(date +%u)
+if [ "$DOW" -ge 6 ]; then
+    echo "===== $(date '+%Y-%m-%d %H:%M:%S') 周末跳过 =====" >> "$LOG_FILE"
+    exit 0
+fi
+
+# 日志超 10MB 仅保留末尾 1MB(常年每日追加,防撑爆磁盘)
+if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt 10485760 ]; then
+    tail -c 1048576 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+fi
+
 # 记录开始时间
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') 开始更新 =====" >> "$LOG_FILE"
 
