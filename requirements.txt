@@ -18,6 +18,7 @@ numpy>=1.24.0
 # ===== 数据源 =====
 tushare>=1.2.60        # 股票信息/资金流向/热门榜单(A股K线走通达信,见 vendor/pytdx)
 requests>=2.31.0       # Binance镜像/OKX REST直连(数字货币K线)
+six>=1.16.0            # vendor/pytdx 内置依赖(旧式py2/3兼容层,import链必经)
 tqdm>=4.65.0           # 日更脚本进度条(缺失时自动降级为无进度)
 
 # ===== AI 分析(OpenAI 兼容 API) =====
