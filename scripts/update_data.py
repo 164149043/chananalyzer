@@ -39,6 +39,13 @@ from ChanAnalyzer.database import get_db, KLineData
 from ChanAnalyzer.tdx_source import TdxSource
 from ChanAnalyzer.intraday_cache import cached_intraday_combos, upsert_intraday
 
+# 进度条(缺 tqdm 时降级为裸迭代,不影响功能)
+try:
+    from tqdm import tqdm as _tqdm
+except ImportError:  # 未安装时静默降级
+    def _tqdm(iterable=None, **kwargs):
+        return iterable if iterable is not None else ()
+
 PROGRESS_FILE = Path(__file__).parent / "_update_progress.json"
 
 DATE_FMT_DAY = "%Y/%m/%d %H:%M:%S"    # DAY 行 date 格式(与重播种一致,15:00 时间戳)
@@ -170,7 +177,7 @@ def refresh_intraday(src: TdxSource):
         return
     print(f"\n分钟线刷新: 库内已缓存 {len(combos)} 个 (code, 周期) 组合")
     ok = fail = 0
-    for code, kl_type in combos:
+    for code, kl_type in _tqdm(combos, desc="分钟线刷新", unit="组", disable=None):
         try:
             n = upsert_intraday(src, code, kl_type)
         except Exception as e:
@@ -216,7 +223,11 @@ def main():
     src = TdxSource()
     failed, t0 = [], time.time()
     try:
-        for code in codes if not args.intraday_only else []:
+        day_codes = [] if args.intraday_only else codes
+        # disable=None: 重定向到文件(非终端)时自动关进度条,避免进度条刷屏撑爆日志
+        bar = _tqdm(day_codes, desc="日线更新", unit="只", disable=None,
+                    initial=len(done & set(day_codes)))  # 断点已完成的计入起点
+        for code in bar:
             if code in done:
                 continue
             try:
