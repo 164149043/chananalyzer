@@ -74,3 +74,7 @@ AGENTS.md
 scripts/_reseed_progress.json
 scripts/_reseed_failed.json
 _reseed_full*.log
+
+# 日更脚本运行时产物(断点续跑状态/失败清单,跑完自动清)
+scripts/_update_progress.json
+scripts/_update_failed.json
